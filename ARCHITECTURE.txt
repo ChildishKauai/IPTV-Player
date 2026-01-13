@@ -1,0 +1,405 @@
+================================================================================
+                    IPTV PLAYER - ARCHITECTURE & DESIGN DOCUMENT
+================================================================================
+
+Project: IPTV Player (Rust Edition)
+Version: 0.1.0
+Created: December 2025
+
+================================================================================
+                              TABLE OF CONTENTS
+================================================================================
+
+1. Overview
+2. Project Structure
+3. Architecture Patterns
+4. Module Descriptions
+5. Design Decisions
+6. UI Component System
+7. State Management
+8. Threading Model
+9. Future Improvements
+
+================================================================================
+                              1. OVERVIEW
+================================================================================
+
+IPTV Player is a modern, cross-platform IPTV client built in Rust using the
+egui/eframe framework. It provides a sleek, Apple-inspired interface for 
+viewing IPTV content via the Xtream Codes API.
+
+Key Features:
+- Live TV channel browsing and playback
+- Series/Episodes browsing
+- Movies/VOD browsing
+- Favorites management
+- Category filtering and search
+- Dark/Light theme support
+- Async image loading with caching
+- Persistent user credentials
+
+================================================================================
+                           2. PROJECT STRUCTURE
+================================================================================
+
+iptv-player-rust/
+├── Cargo.toml                 # Project dependencies and metadata
+├── src/
+│   ├── main.rs                # Application entry point (minimal)
+│   ├── m3u.rs                 # M3U playlist parser
+│   ├── api/                   # API Layer
+│   │   ├── mod.rs             # API module exports
+│   │   └── xtream.rs          # Xtream Codes API client
+│   ├── models/                # Data Models
+│   │   ├── mod.rs             # Model exports
+│   │   ├── config.rs          # User configuration
+│   │   └── types.rs           # Data types (Channel, Series, etc.)
+│   └── ui/                    # User Interface Layer
+│       ├── mod.rs             # UI module exports
+│       ├── app.rs             # Main application state & logic
+│       ├── theme.rs           # Theme configuration (colors, dimensions)
+│       ├── messages.rs        # Message types for async communication
+│       ├── image_cache.rs     # Async image loading & caching
+│       └── components/        # Reusable UI Components
+│           ├── mod.rs         # Component exports
+│           ├── login.rs       # Login screen
+│           ├── sidebar.rs     # Category sidebar
+│           ├── top_nav.rs     # Top navigation bar
+│           ├── channel_card.rs # Channel card display
+│           ├── series_card.rs # Series card display
+│           ├── movie_card.rs  # Movie card display
+│           ├── pagination.rs  # Pagination controls
+│           └── episode_dialog.rs # Episode viewer dialog
+├── examples/
+│   └── parse_m3u.rs           # M3U parsing example
+└── tests/
+    └── xtream_api_test.rs     # API tests
+
+================================================================================
+                        3. ARCHITECTURE PATTERNS
+================================================================================
+
+3.1 LAYERED ARCHITECTURE
+-------------------------
+The application follows a clean layered architecture:
+
+    ┌─────────────────────────────────────────────────────────┐
+    │                    Presentation Layer                    │
+    │              (ui/components, ui/app.rs)                  │
+    ├─────────────────────────────────────────────────────────┤
+    │                    Business Logic Layer                  │
+    │        (ui/app.rs - state management, filtering)         │
+    ├─────────────────────────────────────────────────────────┤
+    │                    Data Access Layer                     │
+    │               (api/xtream.rs, models/)                   │
+    └─────────────────────────────────────────────────────────┘
+
+3.2 COMPONENT-BASED UI
+----------------------
+UI elements are organized as self-contained components that:
+- Accept data as input parameters
+- Return actions for the parent to handle
+- Have no direct access to application state
+- Follow the "props down, actions up" pattern
+
+Example:
+    ChannelCard::show(ui, ctx, theme, channel, is_favorite, image_cache)
+        -> Option<ChannelAction>
+
+3.3 MESSAGE-PASSING CONCURRENCY
+-------------------------------
+Background operations (API calls, image loading) communicate with the 
+main thread via message channels:
+
+    Main Thread                Background Thread
+         │                            │
+         │─────── spawn ─────────────>│
+         │                            │
+         │                    [do async work]
+         │                            │
+         │<────── AppMessage ─────────│
+         │                            │
+    [process message]                 │
+
+3.4 IMMEDIATE MODE GUI (IMGUI)
+------------------------------
+The UI uses egui's immediate mode paradigm:
+- UI is rebuilt every frame
+- State is stored externally in IPTVPlayerApp
+- No UI element objects are retained between frames
+- Simple, predictable rendering flow
+
+================================================================================
+                        4. MODULE DESCRIPTIONS
+================================================================================
+
+4.1 MAIN (main.rs)
+------------------
+Purpose: Application entry point
+Responsibilities:
+- Initialize eframe/egui runtime
+- Configure window settings
+- Create and run IPTVPlayerApp
+
+4.2 API MODULE (api/)
+---------------------
+Purpose: External API communication
+Components:
+- XtreamClient: HTTP client for Xtream Codes API
+
+Responsibilities:
+- Authentication
+- Fetching categories, channels, series, movies
+- Building stream URLs
+
+4.3 MODELS MODULE (models/)
+---------------------------
+Purpose: Data structures and configuration
+Components:
+- Config: User preferences and saved credentials
+- Channel, Category, Series: API data models
+- Custom deserializers for flexible JSON parsing
+
+Key Features:
+- Serde for JSON serialization
+- Custom deserializers handle inconsistent API responses
+- Config persists to ~/.iptv_player_config.json
+
+4.4 UI MODULE (ui/)
+-------------------
+Purpose: User interface and state management
+Components:
+- IPTVPlayerApp: Main application struct (implements eframe::App)
+- Theme: Color and dimension configuration
+- ImageCache: Thread-safe async image loader
+- AppMessage/ContentType: Type definitions
+
+4.5 COMPONENTS SUBMODULE (ui/components/)
+-----------------------------------------
+Purpose: Reusable UI building blocks
+Design Principles:
+- Each component is a struct with static methods
+- Components are stateless
+- Return Option<Action> to signal user interactions
+- Accept minimal required data
+
+Components:
+┌─────────────────┬────────────────────────────────────────────┐
+│ Component       │ Purpose                                    │
+├─────────────────┼────────────────────────────────────────────┤
+│ LoginScreen     │ Authentication form                        │
+│ CategorySidebar │ Category filtering panel                   │
+│ TopNavigation   │ Tab bar, search, controls                  │
+│ ChannelCard     │ Live TV channel display                    │
+│ SeriesCard      │ TV series display                          │
+│ MovieCard       │ Movie/VOD display                          │
+│ Pagination      │ Page navigation controls                   │
+│ EpisodeDialog   │ Series episode viewer                      │
+└─────────────────┴────────────────────────────────────────────┘
+
+================================================================================
+                        5. DESIGN DECISIONS
+================================================================================
+
+5.1 WHY EGUI/EFRAME?
+--------------------
+Decision: Use egui for the UI framework
+Reasons:
+- Pure Rust, no C/C++ dependencies
+- Immediate mode simplifies state management
+- Excellent cross-platform support
+- Fast iteration during development
+- Modern, polished look achievable
+
+Trade-offs:
+- Less native platform integration
+- Higher CPU usage than retained mode
+
+5.2 WHY BLOCKING HTTP?
+----------------------
+Decision: Use reqwest::blocking instead of async
+Reasons:
+- Simpler code flow
+- egui runs on main thread, async would complicate
+- Background threads handle blocking calls
+- Sufficient for this application's needs
+
+Trade-offs:
+- Thread per request instead of task
+- Slightly higher resource usage
+
+5.3 WHY COMPONENT PATTERN?
+--------------------------
+Decision: Extract UI elements into separate component files
+Reasons:
+- Improved code organization (main.rs: 1600→47 lines)
+- Easier testing and modification
+- Clear separation of concerns
+- Reusability potential
+
+5.4 WHY ENUM-BASED ACTIONS?
+---------------------------
+Decision: Components return Option<Action> enums
+Reasons:
+- Type-safe action handling
+- Clear contract between components
+- Avoids callback spaghetti
+- Easy to add new actions
+
+Example:
+    enum ChannelAction {
+        Play(Channel),
+        ToggleFavorite(String),
+    }
+
+5.5 WHY CENTRALIZED THEME?
+--------------------------
+Decision: Single Theme struct for all styling
+Reasons:
+- Consistent look and feel
+- Easy dark/light mode toggle
+- Single source of truth for colors
+- Dimensions constants prevent magic numbers
+
+================================================================================
+                        6. UI COMPONENT SYSTEM
+================================================================================
+
+6.1 COMPONENT INTERFACE PATTERN
+-------------------------------
+All components follow this interface:
+
+    impl ComponentName {
+        pub fn show(
+            ui: &mut egui::Ui,      // egui drawing context
+            ctx: &egui::Context,    // egui global context (optional)
+            theme: &Theme,          // styling configuration
+            data: &DataType,        // component-specific data
+            ...
+        ) -> Option<ActionType> {   // action if user interacted
+            // Render component
+            // Return action if triggered
+        }
+    }
+
+6.2 THEME SYSTEM
+----------------
+The Theme struct provides:
+- Color palette (background, text, accent, etc.)
+- Mode toggle (dark/light)
+- Helper methods for hover states
+- Apply method to set egui context styles
+
+Dimensions module provides:
+- Card sizes
+- Button sizes
+- Margin/padding values
+- Pagination settings
+
+================================================================================
+                        7. STATE MANAGEMENT
+================================================================================
+
+7.1 CENTRALIZED STATE
+---------------------
+All application state lives in IPTVPlayerApp:
+
+    struct IPTVPlayerApp {
+        // Configuration
+        config: Config,
+        
+        // Connection
+        server_url, username, password,
+        connected, connecting, error_message,
+        
+        // Content Data
+        live_categories, series_categories, movie_categories,
+        all_channels, filtered_channels,
+        all_series, filtered_series,
+        all_movies, filtered_movies,
+        
+        // UI State
+        current_content, selected_category,
+        search_query, category_search,
+        show_series_dialog, selected_series_id,
+        dark_mode,
+        
+        // Pagination
+        page_size, current_page,
+        
+        // Communication
+        rx, tx,
+        
+        // Resources
+        image_cache,
+    }
+
+7.2 STATE UPDATE FLOW
+---------------------
+    1. User Interaction (button click, text input)
+           │
+           ▼
+    2. Component returns Action
+           │
+           ▼
+    3. App matches action, updates state
+           │
+           ▼
+    4. Next frame renders with new state
+
+================================================================================
+                        8. THREADING MODEL
+================================================================================
+
+8.1 MAIN THREAD
+---------------
+- Runs egui event loop
+- Handles all UI rendering
+- Processes messages from background threads
+- Updates application state
+
+8.2 BACKGROUND THREADS
+----------------------
+Used for:
+- API calls (authentication, data fetching)
+- Image downloading and decoding
+
+Communication:
+- Send AppMessage via mpsc::Sender
+- Main thread polls mpsc::Receiver each frame
+
+8.3 IMAGE CACHE
+---------------
+Thread-safe image loading:
+    - HashMap<String, TextureHandle> protected by Mutex
+    - HashSet<String> tracks loading URLs
+    - Background thread downloads, decodes, caches
+    - Main thread reads cached textures
+
+================================================================================
+                        9. FUTURE IMPROVEMENTS
+================================================================================
+
+9.1 POTENTIAL ENHANCEMENTS
+--------------------------
+- EPG (Electronic Program Guide) support
+- Video player integration (libmpv/VLC)
+- Playlist export/import
+- Multi-server support
+- Recording functionality
+- Keyboard shortcuts
+- Accessibility improvements
+
+9.2 TECHNICAL IMPROVEMENTS
+--------------------------
+- Async runtime (tokio) for better resource usage
+- Connection pooling for API requests
+- LRU cache for images
+- Lazy loading for large lists
+- Virtualized scrolling
+- Unit test coverage
+- Integration tests
+
+================================================================================
+                           END OF DOCUMENT
+================================================================================

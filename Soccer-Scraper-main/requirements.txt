@@ -1,0 +1,9 @@
+requests>=2.31.0
+beautifulsoup4>=4.12.0
+lxml>=5.0.0
+pandas>=2.2.0
+selenium>=4.16.0
+webdriver-manager>=4.0.0
+python-dotenv>=1.0.0
+undetected-chromedriver>=3.5.0
+selenium-stealth>=1.0.6
