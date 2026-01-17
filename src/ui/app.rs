@@ -13,6 +13,7 @@ use std::thread;
 use crate::api::XtreamClient;
 use crate::api::DiscoverCategory;
 use crate::api::{FootballCache, FootballCategory};
+use crate::api::ScraperManager;
 use crate::models::*;
 use super::theme::{Theme, dimensions};
 use super::messages::{AppMessage, ContentType};
@@ -137,6 +138,10 @@ pub struct IPTVPlayerApp {
     football_category: FootballCategory,
     /// Watch history for continue watching feature
     watch_history: crate::models::WatchHistory,
+    /// Football fixtures scraper manager
+    scraper_manager: ScraperManager,
+    /// Whether the scraper settings dialog is open
+    show_scraper_settings: bool,
 }
 
 impl IPTVPlayerApp {
@@ -184,6 +189,8 @@ impl IPTVPlayerApp {
             football_cache: FootballCache::new(),
             football_category: FootballCategory::Today,
             watch_history: crate::models::WatchHistory::load(),
+            scraper_manager: ScraperManager::new(),
+            show_scraper_settings: false,
         };
         
         // Auto-login if credentials are saved
@@ -1629,6 +1636,9 @@ impl eframe::App for IPTVPlayerApp {
                                         self.temp_player_settings = Some(self.config.player_settings.clone());
                                         self.show_player_settings = true;
                                     }
+                                    top_nav::NavAction::OpenScraperSettings => {
+                                        self.show_scraper_settings = true;
+                                    }
                                     top_nav::NavAction::ToggleSidebar => {
                                         self.sidebar_visible = !self.sidebar_visible;
                                     }
@@ -1674,6 +1684,41 @@ impl eframe::App for IPTVPlayerApp {
                             }
                         }
                     }
+                }
+            }
+            
+            // Scraper settings dialog
+            if self.show_scraper_settings {
+                let mut should_close = false;
+                egui::Window::new("Football Fixtures Scraper")
+                    .open(&mut self.show_scraper_settings)
+                    .resizable(true)
+                    .default_width(400.0)
+                    .show(ctx, |ui| {
+                        let scraper_status = self.scraper_manager.status();
+                        if let Some(action) = ScraperSettingsDialog::show(
+                            ui,
+                            &theme,
+                            self.scraper_manager.is_available(),
+                            &scraper_status,
+                        ) {
+                            match action {
+                                scraper_settings::ScraperAction::TriggerScrape => {
+                                    // Spawn background thread for scraping
+                                    let mut mgr = ScraperManager::new();
+                                    thread::spawn(move || {
+                                        let _ = mgr.scrape_blocking();
+                                    });
+                                }
+                                scraper_settings::ScraperAction::Close => {
+                                    should_close = true;
+                                }
+                            }
+                        }
+                    });
+                
+                if should_close {
+                    self.show_scraper_settings = false;
                 }
             }
         }

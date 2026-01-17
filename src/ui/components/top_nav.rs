@@ -17,6 +17,8 @@ pub enum NavAction {
     Disconnect,
     /// Open player settings
     OpenPlayerSettings,
+    /// Open scraper settings
+    OpenScraperSettings,
     /// Toggle sidebar visibility (for mobile)
     ToggleSidebar,
 }
@@ -146,6 +148,16 @@ impl TopNavigation {
                         });
                     
                     ui.add_space(16.0);
+                    
+                    // Scraper settings button
+                    let scraper_btn = egui::Button::new(egui::RichText::new("📊").size(18.0).color(theme.text_primary))
+                        .fill(egui::Color32::TRANSPARENT);
+                    
+                    if ui.add(scraper_btn).on_hover_text("Football Fixtures Scraper").clicked() {
+                        action = Some(NavAction::OpenScraperSettings);
+                    }
+                    
+                    ui.add_space(8.0);
                     
                     let settings_btn = egui::Button::new(egui::RichText::new("⚙").size(18.0).color(theme.text_primary))
                         .fill(egui::Color32::TRANSPARENT);

@@ -8,6 +8,7 @@
 //! - Player settings for audio/subtitle configuration
 //! - Discover cards for TV show discovery
 //! - Football fixture cards for live sports
+//! - Scraper settings for fixture scraping
 //! - Common UI utilities
 
 pub mod login;
@@ -21,6 +22,7 @@ pub mod episode_dialog;
 pub mod player_settings;
 pub mod discover_card;
 pub mod football_card;
+pub mod scraper_settings;
 
 pub use login::LoginScreen;
 pub use sidebar::CategorySidebar;
@@ -33,3 +35,4 @@ pub use episode_dialog::EpisodeDialog;
 pub use football_card::{FootballCard, FootballAction};
 pub use player_settings::PlayerSettingsDialog;
 pub use discover_card::{DiscoverCard, DiscoverAction};
+pub use scraper_settings::ScraperSettingsDialog;
