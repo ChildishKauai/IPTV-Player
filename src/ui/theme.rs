@@ -202,6 +202,9 @@ pub mod dimensions {
     /// Breakpoints for responsive design
     pub const MOBILE_BREAKPOINT: f32 = 600.0;
     pub const TABLET_BREAKPOINT: f32 = 900.0;
+    /// Steam Deck screen width (1280x800 in portable mode)
+    pub const STEAM_DECK_WIDTH: f32 = 1280.0;
+    pub const STEAM_DECK_HEIGHT: f32 = 800.0;
     
     /// Card dimensions (desktop) - Netflix poster style
     pub const CHANNEL_CARD_WIDTH: f32 = 200.0;
@@ -211,6 +214,12 @@ pub mod dimensions {
     pub const MOVIE_CARD_WIDTH: f32 = 180.0;
     pub const MOVIE_CARD_HEIGHT: f32 = 270.0;
     
+    /// Steam Deck optimized card dimensions (larger for touch)
+    pub const STEAM_DECK_CARD_WIDTH: f32 = 220.0;
+    pub const STEAM_DECK_CARD_HEIGHT: f32 = 150.0;
+    pub const STEAM_DECK_SERIES_CARD_WIDTH: f32 = 200.0;
+    pub const STEAM_DECK_SERIES_CARD_HEIGHT: f32 = 300.0;
+    
     /// Image dimensions - taller poster ratio like Netflix
     pub const CHANNEL_ICON_SIZE: f32 = 80.0;
     pub const POSTER_WIDTH: f32 = 180.0;
@@ -218,15 +227,34 @@ pub mod dimensions {
     
     /// Sidebar dimensions
     pub const SIDEBAR_WIDTH: f32 = 200.0;
+    pub const STEAM_DECK_SIDEBAR_WIDTH: f32 = 240.0;
     pub const CATEGORY_BUTTON_WIDTH: f32 = 175.0;
     pub const CATEGORY_BUTTON_HEIGHT: f32 = 40.0;
+    pub const STEAM_DECK_CATEGORY_BUTTON_HEIGHT: f32 = 52.0;
     
-    /// Button dimensions
-    pub const BUTTON_HEIGHT: f32 = 44.0; // Increased for touch targets
-    pub const SMALL_BUTTON_SIZE: f32 = 44.0; // Minimum touch target
+    /// Button dimensions - Steam Deck friendly (larger touch targets)
+    pub const BUTTON_HEIGHT: f32 = 44.0;
+    pub const SMALL_BUTTON_SIZE: f32 = 44.0;
+    /// Steam Deck minimum touch target (56px for comfortable touch/controller)
+    pub const STEAM_DECK_BUTTON_HEIGHT: f32 = 56.0;
+    pub const STEAM_DECK_TOUCH_TARGET: f32 = 56.0;
     
     /// Pagination
     pub const DEFAULT_PAGE_SIZE: usize = 30;
+    pub const STEAM_DECK_PAGE_SIZE: usize = 18; // Fewer items for larger cards
+    
+    /// Check if likely running on Steam Deck (based on screen dimensions)
+    pub fn is_steam_deck(screen_width: f32, screen_height: f32) -> bool {
+        // Steam Deck has 1280x800 screen, or could be docked at various resolutions
+        // Detect portable mode specifically
+        (screen_width >= 1200.0 && screen_width <= 1300.0 && screen_height >= 750.0 && screen_height <= 850.0)
+            || (screen_height >= 1200.0 && screen_height <= 1300.0 && screen_width >= 750.0 && screen_width <= 850.0) // Portrait
+    }
+    
+    /// Check if in touch-friendly mode (Steam Deck or tablet)
+    pub fn is_touch_mode(screen_width: f32, screen_height: f32) -> bool {
+        is_steam_deck(screen_width, screen_height) || is_tablet(screen_width)
+    }
     
     /// Check if in mobile mode based on screen width
     pub fn is_mobile(screen_width: f32) -> bool {
@@ -251,6 +279,19 @@ pub mod dimensions {
         }
     }
     
+    /// Get card width optimized for Steam Deck/touch
+    pub fn card_width_touch(screen_width: f32, screen_height: f32) -> f32 {
+        if is_steam_deck(screen_width, screen_height) {
+            STEAM_DECK_SERIES_CARD_WIDTH
+        } else if is_mobile(screen_width) {
+            ((screen_width - 48.0) / 2.0).max(160.0)
+        } else if is_tablet(screen_width) {
+            ((screen_width - 80.0) / 3.0).min(200.0)
+        } else {
+            MOVIE_CARD_WIDTH
+        }
+    }
+    
     /// Get poster height based on width (3:2 aspect ratio for Netflix-style)
     pub fn poster_height(width: f32) -> f32 {
         width * 1.5
@@ -267,10 +308,34 @@ pub mod dimensions {
         }
     }
     
+    /// Get sidebar width for Steam Deck/touch mode
+    pub fn sidebar_width_touch(screen_width: f32, screen_height: f32) -> f32 {
+        if is_steam_deck(screen_width, screen_height) {
+            STEAM_DECK_SIDEBAR_WIDTH
+        } else if is_mobile(screen_width) {
+            screen_width * 0.85
+        } else if is_tablet(screen_width) {
+            200.0
+        } else {
+            SIDEBAR_WIDTH
+        }
+    }
+    
     /// Get responsive channel card height
     pub fn channel_card_height(screen_width: f32) -> f32 {
         if is_mobile(screen_width) {
             90.0
+        } else {
+            CHANNEL_CARD_HEIGHT
+        }
+    }
+    
+    /// Get channel card height for Steam Deck/touch
+    pub fn channel_card_height_touch(screen_width: f32, screen_height: f32) -> f32 {
+        if is_steam_deck(screen_width, screen_height) {
+            STEAM_DECK_CARD_HEIGHT
+        } else if is_mobile(screen_width) {
+            100.0
         } else {
             CHANNEL_CARD_HEIGHT
         }
@@ -285,9 +350,53 @@ pub mod dimensions {
         }
     }
     
+    /// Get button height for current mode
+    pub fn button_height(screen_width: f32, screen_height: f32) -> f32 {
+        if is_steam_deck(screen_width, screen_height) || is_tablet(screen_width) {
+            STEAM_DECK_BUTTON_HEIGHT
+        } else if is_mobile(screen_width) {
+            48.0
+        } else {
+            BUTTON_HEIGHT
+        }
+    }
+    
+    /// Get minimum touch target size
+    pub fn touch_target(screen_width: f32, screen_height: f32) -> f32 {
+        if is_steam_deck(screen_width, screen_height) || is_tablet(screen_width) {
+            STEAM_DECK_TOUCH_TARGET
+        } else if is_mobile(screen_width) {
+            48.0
+        } else {
+            SMALL_BUTTON_SIZE
+        }
+    }
+    
+    /// Get category button height for current mode
+    pub fn category_button_height(screen_width: f32, screen_height: f32) -> f32 {
+        if is_steam_deck(screen_width, screen_height) || is_tablet(screen_width) {
+            STEAM_DECK_CATEGORY_BUTTON_HEIGHT
+        } else {
+            CATEGORY_BUTTON_HEIGHT
+        }
+    }
+    
     /// Get page size based on screen size
     pub fn page_size(screen_width: f32) -> usize {
         if is_mobile(screen_width) {
+            15
+        } else if is_tablet(screen_width) {
+            20
+        } else {
+            DEFAULT_PAGE_SIZE
+        }
+    }
+    
+    /// Get page size for Steam Deck/touch mode
+    pub fn page_size_touch(screen_width: f32, screen_height: f32) -> usize {
+        if is_steam_deck(screen_width, screen_height) {
+            STEAM_DECK_PAGE_SIZE
+        } else if is_mobile(screen_width) {
             15
         } else if is_tablet(screen_width) {
             20

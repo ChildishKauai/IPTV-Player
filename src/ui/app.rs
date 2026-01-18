@@ -98,6 +98,8 @@ pub struct IPTVPlayerApp {
     sidebar_visible: bool,
     /// Cached screen width for responsive layout
     screen_width: f32,
+    /// Cached screen height for Steam Deck detection
+    screen_height: f32,
     
     // ─────────────────────────────────────────────────────────────────────
     // Pagination
@@ -176,6 +178,7 @@ impl IPTVPlayerApp {
             dark_mode: true,
             sidebar_visible: true,  // Visible by default on desktop
             screen_width: 1280.0,   // Default, will be updated each frame
+            screen_height: 800.0,   // Default Steam Deck height, will be updated each frame
             page_size: dimensions::DEFAULT_PAGE_SIZE,
             current_page: 0,
             rx: Some(rx),
@@ -599,6 +602,11 @@ impl IPTVPlayerApp {
         let _ = self.config.save();
     }
     
+    /// Returns whether we're in touch-friendly mode (Steam Deck or tablet).
+    fn is_touch_mode(&self) -> bool {
+        dimensions::is_touch_mode(self.screen_width, self.screen_height)
+    }
+    
     // ═══════════════════════════════════════════════════════════════════════
     // Message Processing
     // ═══════════════════════════════════════════════════════════════════════
@@ -876,7 +884,7 @@ impl IPTVPlayerApp {
         });
         
         // Handle pagination
-        if let Some(new_page) = Pagination::show(ui, theme, self.current_page, total_pages) {
+        if let Some(new_page) = Pagination::show(ui, theme, self.current_page, total_pages, self.is_touch_mode()) {
             self.current_page = new_page;
         }
         
@@ -951,7 +959,7 @@ impl IPTVPlayerApp {
             }
         });
         
-        if let Some(new_page) = Pagination::show(ui, theme, self.current_page, total_pages) {
+        if let Some(new_page) = Pagination::show(ui, theme, self.current_page, total_pages, self.is_touch_mode()) {
             self.current_page = new_page;
         }
     }
@@ -1006,7 +1014,7 @@ impl IPTVPlayerApp {
             }
         });
         
-        if let Some(new_page) = Pagination::show(ui, theme, self.current_page, total_pages) {
+        if let Some(new_page) = Pagination::show(ui, theme, self.current_page, total_pages, self.is_touch_mode()) {
             self.current_page = new_page;
         }
         
@@ -1364,9 +1372,11 @@ impl eframe::App for IPTVPlayerApp {
         // Process background messages
         self.process_messages();
         
-        // Update screen width for responsive layout
+        // Update screen dimensions for responsive layout
         self.screen_width = ctx.screen_rect().width();
+        self.screen_height = ctx.screen_rect().height();
         let is_mobile = dimensions::is_mobile(self.screen_width);
+        let is_touch_mode = dimensions::is_touch_mode(self.screen_width, self.screen_height);
         
         if !self.connected {
             // Show login screen
@@ -1379,6 +1389,7 @@ impl eframe::App for IPTVPlayerApp {
                     &mut self.password,
                     self.connecting,
                     &self.error_message,
+                    is_touch_mode,
                 ) {
                     self.connect();
                 }
@@ -1386,10 +1397,10 @@ impl eframe::App for IPTVPlayerApp {
         } else {
             // Show main application
             
-            // Sidebar - on mobile, show as overlay when sidebar_visible is true
+            // Sidebar - on mobile/touch show as overlay when sidebar_visible is true
             // On desktop, always show
-            let show_sidebar = if is_mobile { self.sidebar_visible } else { true };
-            let sidebar_width = dimensions::sidebar_width(self.screen_width);
+            let show_sidebar = if is_mobile || is_touch_mode { self.sidebar_visible } else { true };
+            let sidebar_width = dimensions::sidebar_width_touch(self.screen_width, self.screen_height);
             
             if show_sidebar {
                 egui::SidePanel::left("categories")
@@ -1401,13 +1412,15 @@ impl eframe::App for IPTVPlayerApp {
                         } else { 
                             egui::Color32::from_rgb(250, 250, 250) 
                         })
-                        .inner_margin(egui::Margin::same(if is_mobile { 12.0 } else { 16.0 })))
+                        .inner_margin(egui::Margin::same(if is_mobile { 12.0 } else if is_touch_mode { 16.0 } else { 16.0 })))
                     .show(ctx, |ui| {
-                        // Close button on mobile
-                        if is_mobile {
+                        // Close button on mobile/touch
+                        if is_mobile || is_touch_mode {
                             ui.horizontal(|ui| {
                                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                    if ui.button(egui::RichText::new("✕").size(20.0)).clicked() {
+                                    let close_btn = egui::Button::new(egui::RichText::new("✕").size(if is_touch_mode { 24.0 } else { 20.0 }))
+                                        .min_size(egui::vec2(if is_touch_mode { 48.0 } else { 36.0 }, if is_touch_mode { 48.0 } else { 36.0 }));
+                                    if ui.add(close_btn).clicked() {
                                         self.sidebar_visible = false;
                                     }
                                 });
@@ -1470,15 +1483,19 @@ impl eframe::App for IPTVPlayerApp {
                                         theme.text_secondary
                                     };
                                     
+                                    // Touch-friendly button sizing
+                                    let btn_height = if is_touch_mode { 48.0 } else { 28.0 };
+                                    let font_size = if is_touch_mode { 15.0 } else { 13.0 };
+                                    
                                     let response = ui.add(
                                         egui::Button::new(
                                             egui::RichText::new(category.display_name())
-                                                .size(13.0)
+                                                .size(font_size)
                                                 .color(text_color)
                                         )
                                         .fill(egui::Color32::TRANSPARENT)
                                         .frame(false)
-                                        .min_size(egui::vec2(180.0, 28.0))
+                                        .min_size(egui::vec2(if is_touch_mode { 200.0 } else { 180.0 }, btn_height))
                                     );
                                     
                                     // Draw underline on hover or selected
@@ -1493,7 +1510,7 @@ impl eframe::App for IPTVPlayerApp {
                                     
                                     if response.clicked() {
                                         self.football_category = *category;
-                                        if is_mobile {
+                                        if is_mobile || is_touch_mode {
                                             self.sidebar_visible = false;
                                         }
                                     }
@@ -1551,15 +1568,19 @@ impl eframe::App for IPTVPlayerApp {
                                         theme.text_secondary
                                     };
                                     
+                                    // Touch-friendly button sizing
+                                    let btn_height = if is_touch_mode { 48.0 } else { 28.0 };
+                                    let font_size = if is_touch_mode { 15.0 } else { 13.0 };
+                                    
                                     let response = ui.add(
                                         egui::Button::new(
                                             egui::RichText::new(category.display_name())
-                                                .size(13.0)
+                                                .size(font_size)
                                                 .color(text_color)
                                         )
                                         .fill(egui::Color32::TRANSPARENT)
                                         .frame(false)
-                                        .min_size(egui::vec2(180.0, 28.0))
+                                        .min_size(egui::vec2(if is_touch_mode { 200.0 } else { 180.0 }, btn_height))
                                     );
                                     
                                     // Draw underline on hover or selected
@@ -1574,7 +1595,7 @@ impl eframe::App for IPTVPlayerApp {
                                     
                                     if response.clicked() {
                                         self.discover_category = *category;
-                                        if is_mobile {
+                                        if is_mobile || is_touch_mode {
                                             self.sidebar_visible = false;
                                         }
                                     }
@@ -1589,9 +1610,11 @@ impl eframe::App for IPTVPlayerApp {
             egui::CentralPanel::default()
                 .frame(egui::Frame::none().fill(theme.bg_color))
                 .show(ctx, |ui| {
-                    // Top navigation
+                    // Top navigation - larger margins for touch mode
                     let nav_margin = if is_mobile { 
                         egui::Margin::symmetric(12.0, 10.0) 
+                    } else if is_touch_mode {
+                        egui::Margin::symmetric(20.0, 14.0) 
                     } else { 
                         egui::Margin::symmetric(20.0, 16.0) 
                     };
@@ -1607,6 +1630,7 @@ impl eframe::App for IPTVPlayerApp {
                                 self.current_content,
                                 &mut self.search_query,
                                 is_mobile,
+                                is_touch_mode,
                             ) {
                                 match action {
                                     top_nav::NavAction::SwitchContent(content_type) => {

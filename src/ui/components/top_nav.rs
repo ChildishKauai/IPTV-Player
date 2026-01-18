@@ -35,17 +35,22 @@ impl TopNavigation {
         current_content: ContentType,
         search_query: &mut String,
         is_mobile: bool,
+        is_touch_mode: bool, // Steam Deck or tablet
     ) -> Option<NavAction> {
         let mut action: Option<NavAction> = None;
         
+        // Touch-friendly button size
+        let touch_btn_size = if is_touch_mode { 56.0 } else { 44.0 };
+        let icon_size = if is_touch_mode { 24.0 } else { 20.0 };
+        
         ui.horizontal(|ui| {
-            // Menu button for mobile
-            if is_mobile {
+            // Menu button for mobile/touch
+            if is_mobile || is_touch_mode {
                 let menu_btn = egui::Button::new(
-                    egui::RichText::new("☰").size(20.0).color(theme.text_primary)
+                    egui::RichText::new("☰").size(icon_size).color(theme.text_primary)
                 )
                 .fill(egui::Color32::TRANSPARENT)
-                .min_size(egui::vec2(44.0, 44.0));
+                .min_size(egui::vec2(touch_btn_size, touch_btn_size));
                 
                 if ui.add(menu_btn).clicked() {
                     action = Some(NavAction::ToggleSidebar);
@@ -92,38 +97,41 @@ impl TopNavigation {
                     action = Some(NavAction::SwitchContent(ContentType::FootballFixtures));
                 }
             } else {
-                // Mobile tabs - compact icons
+                // Mobile/touch tabs - larger touch targets
+                let tab_btn_size = if is_touch_mode { 52.0 } else { 44.0 };
+                let tab_icon_size = if is_touch_mode { 20.0 } else { 16.0 };
                 ui.add_space(8.0);
-                if Self::mobile_tab_button(ui, theme, matches!(current_content, ContentType::LiveTV), "📡").clicked() {
+                if Self::mobile_tab_button(ui, theme, matches!(current_content, ContentType::LiveTV), "📡", tab_btn_size, tab_icon_size).clicked() {
                     action = Some(NavAction::SwitchContent(ContentType::LiveTV));
                 }
-                if Self::mobile_tab_button(ui, theme, matches!(current_content, ContentType::ContinueWatching), "▶️").clicked() {
+                if Self::mobile_tab_button(ui, theme, matches!(current_content, ContentType::ContinueWatching), "▶️", tab_btn_size, tab_icon_size).clicked() {
                     action = Some(NavAction::SwitchContent(ContentType::ContinueWatching));
                 }
-                if Self::mobile_tab_button(ui, theme, matches!(current_content, ContentType::Series), "🎬").clicked() {
+                if Self::mobile_tab_button(ui, theme, matches!(current_content, ContentType::Series), "🎬", tab_btn_size, tab_icon_size).clicked() {
                     action = Some(NavAction::SwitchContent(ContentType::Series));
                 }
-                if Self::mobile_tab_button(ui, theme, matches!(current_content, ContentType::Movies), "🎥").clicked() {
+                if Self::mobile_tab_button(ui, theme, matches!(current_content, ContentType::Movies), "🎥", tab_btn_size, tab_icon_size).clicked() {
                     action = Some(NavAction::SwitchContent(ContentType::Movies));
                 }
-                if Self::mobile_tab_button(ui, theme, matches!(current_content, ContentType::Favorites), "⭐").clicked() {
+                if Self::mobile_tab_button(ui, theme, matches!(current_content, ContentType::Favorites), "⭐", tab_btn_size, tab_icon_size).clicked() {
                     action = Some(NavAction::SwitchContent(ContentType::Favorites));
                 }
-                if Self::mobile_tab_button(ui, theme, matches!(current_content, ContentType::Discover), "🔥").clicked() {
+                if Self::mobile_tab_button(ui, theme, matches!(current_content, ContentType::Discover), "🔥", tab_btn_size, tab_icon_size).clicked() {
                     action = Some(NavAction::SwitchContent(ContentType::Discover));
                 }
-                if Self::mobile_tab_button(ui, theme, matches!(current_content, ContentType::FootballFixtures), "⚽").clicked() {
+                if Self::mobile_tab_button(ui, theme, matches!(current_content, ContentType::FootballFixtures), "⚽", tab_btn_size, tab_icon_size).clicked() {
                     action = Some(NavAction::SwitchContent(ContentType::FootballFixtures));
                 }
             }
             
             // Right-aligned controls
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if is_mobile {
-                    // Compact mobile controls
-                    let settings_btn = egui::Button::new(egui::RichText::new("⚙").size(18.0).color(theme.text_primary))
+                if is_mobile || is_touch_mode {
+                    // Touch-friendly controls
+                    let ctrl_icon_size = if is_touch_mode { 22.0 } else { 18.0 };
+                    let settings_btn = egui::Button::new(egui::RichText::new("⚙").size(ctrl_icon_size).color(theme.text_primary))
                         .fill(egui::Color32::TRANSPARENT)
-                        .min_size(egui::vec2(40.0, 40.0));
+                        .min_size(egui::vec2(touch_btn_size, touch_btn_size));
                     if ui.add(settings_btn).clicked() {
                         action = Some(NavAction::OpenPlayerSettings);
                     }
@@ -255,8 +263,8 @@ impl TopNavigation {
         response
     }
     
-    /// Creates a compact icon tab button for mobile.
-    fn mobile_tab_button(ui: &mut egui::Ui, theme: &Theme, is_selected: bool, icon: &str) -> egui::Response {
+    /// Creates a touch-friendly icon tab button for mobile/Steam Deck.
+    fn mobile_tab_button(ui: &mut egui::Ui, theme: &Theme, is_selected: bool, icon: &str, btn_size: f32, icon_size: f32) -> egui::Response {
         let fg = if is_selected {
             theme.text_primary
         } else {
@@ -264,9 +272,9 @@ impl TopNavigation {
         };
         
         let response = ui.add(
-            egui::Button::new(egui::RichText::new(icon).size(16.0).color(fg))
+            egui::Button::new(egui::RichText::new(icon).size(icon_size).color(fg))
                 .fill(egui::Color32::TRANSPARENT)
-                .min_size(egui::vec2(36.0, 36.0))
+                .min_size(egui::vec2(btn_size, btn_size))
         );
         
         // Underline for selected
@@ -275,7 +283,7 @@ impl TopNavigation {
             ui.painter().hline(
                 rect.min.x + 4.0..=rect.max.x - 4.0,
                 rect.max.y + 1.0,
-                egui::Stroke::new(2.0, theme.accent_blue),
+                egui::Stroke::new(3.0, theme.accent_blue),
             );
         }
         

@@ -4,15 +4,16 @@ use std::fs;
 use std::path::PathBuf;
 
 /// Available media player backends.
+/// MPV is the default as it works more reliably across platforms including Steam Deck.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum PlayerType {
-    /// FFplay - part of FFmpeg suite
-    FFplay,
-    /// VLC media player (default)
+    /// MPV media player (default - most reliable cross-platform)
     #[default]
-    VLC,
-    /// MPV media player
     MPV,
+    /// FFplay - part of FFmpeg suite (bundled fallback)
+    FFplay,
+    /// VLC media player
+    VLC,
     /// MPC-HC (Media Player Classic - Home Cinema)
     MpcHc,
     /// PotPlayer
@@ -25,9 +26,9 @@ impl PlayerType {
     /// Get display name for the player.
     pub fn display_name(&self) -> &'static str {
         match self {
-            PlayerType::FFplay => "FFplay (FFmpeg)",
+            PlayerType::MPV => "MPV (Recommended)",
+            PlayerType::FFplay => "FFplay (Bundled)",
             PlayerType::VLC => "VLC Media Player",
-            PlayerType::MPV => "MPV",
             PlayerType::MpcHc => "MPC-HC",
             PlayerType::PotPlayer => "PotPlayer",
             PlayerType::Custom => "Custom Player",
@@ -84,11 +85,12 @@ impl PlayerType {
     }
     
     /// Get all available player types.
+    /// Listed in recommended order: MPV (most reliable), FFplay (bundled), then others.
     pub fn all() -> &'static [PlayerType] {
         &[
+            PlayerType::MPV,
             PlayerType::FFplay,
             PlayerType::VLC,
-            PlayerType::MPV,
             PlayerType::MpcHc,
             PlayerType::PotPlayer,
             PlayerType::Custom,

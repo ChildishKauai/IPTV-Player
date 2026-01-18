@@ -7,19 +7,26 @@ use crate::ui::theme::Theme;
 pub struct Pagination;
 
 impl Pagination {
-    /// Renders Netflix-style pagination controls.
+    /// Renders Netflix-style pagination controls with touch-friendly sizing.
     /// Returns the new page number if changed.
     pub fn show(
         ui: &mut egui::Ui,
         theme: &Theme,
         current_page: usize,
         total_pages: usize,
+        is_touch_mode: bool, // Steam Deck or tablet
     ) -> Option<usize> {
         if total_pages <= 1 {
             return None;
         }
         
         let mut new_page: Option<usize> = None;
+        
+        // Touch-friendly sizing
+        let btn_height = if is_touch_mode { 52.0 } else { 36.0 };
+        let page_btn_size = if is_touch_mode { 52.0 } else { 36.0 };
+        let font_size = if is_touch_mode { 15.0 } else { 13.0 };
+        let spacing = if is_touch_mode { 20.0 } else { 16.0 };
         
         ui.add_space(24.0);
         ui.horizontal(|ui| {
@@ -32,18 +39,18 @@ impl Pagination {
             
             let prev_btn = egui::Button::new(
                 egui::RichText::new("← Previous")
-                    .size(13.0)
+                    .size(font_size)
                     .color(prev_color)
             )
             .fill(prev_bg)
-            .rounding(egui::Rounding::same(4.0))
-            .min_size(egui::vec2(100.0, 36.0));
+            .rounding(egui::Rounding::same(6.0))
+            .min_size(egui::vec2(if is_touch_mode { 120.0 } else { 100.0 }, btn_height));
             
             if ui.add_enabled(prev_enabled, prev_btn).clicked() {
                 new_page = Some(current_page.saturating_sub(1));
             }
             
-            ui.add_space(16.0);
+            ui.add_space(spacing);
             
             // Page dots / numbers (show up to 5 pages)
             let start_page = if current_page < 2 { 0 } else { current_page.saturating_sub(2) };
@@ -54,20 +61,20 @@ impl Pagination {
                 let page_btn = if is_current {
                     egui::Button::new(
                         egui::RichText::new(format!("{}", page + 1))
-                            .size(13.0)
+                            .size(font_size)
                             .color(egui::Color32::WHITE)
                     )
                     .fill(theme.accent_blue)
-                    .min_size(egui::vec2(36.0, 36.0))
-                    .rounding(egui::Rounding::same(4.0))
+                    .min_size(egui::vec2(page_btn_size, page_btn_size))
+                    .rounding(egui::Rounding::same(6.0))
                 } else {
                     egui::Button::new(
                         egui::RichText::new(format!("{}", page + 1))
-                            .size(13.0)
+                            .size(font_size)
                             .color(theme.text_secondary)
                     )
                     .fill(egui::Color32::TRANSPARENT)
-                    .min_size(egui::vec2(36.0, 36.0))
+                    .min_size(egui::vec2(page_btn_size, page_btn_size))
                 };
                 
                 if ui.add(page_btn).clicked() && !is_current {
@@ -77,10 +84,10 @@ impl Pagination {
             
             // Show ellipsis if there are more pages
             if end_page < total_pages {
-                ui.label(egui::RichText::new("...").size(14.0).color(theme.text_secondary));
+                ui.label(egui::RichText::new("...").size(font_size + 1.0).color(theme.text_secondary));
             }
             
-            ui.add_space(16.0);
+            ui.add_space(spacing);
             
             // Next button - minimal Netflix style
             let next_enabled = current_page < total_pages - 1;
@@ -89,12 +96,12 @@ impl Pagination {
             
             let next_btn = egui::Button::new(
                 egui::RichText::new("Next →")
-                    .size(13.0)
+                    .size(font_size)
                     .color(next_color)
             )
             .fill(next_bg)
-            .rounding(egui::Rounding::same(4.0))
-            .min_size(egui::vec2(100.0, 36.0));
+            .rounding(egui::Rounding::same(6.0))
+            .min_size(egui::vec2(if is_touch_mode { 120.0 } else { 100.0 }, btn_height));
             
             if ui.add_enabled(next_enabled, next_btn).clicked() {
                 new_page = Some(current_page + 1);
