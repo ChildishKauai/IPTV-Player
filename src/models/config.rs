@@ -290,16 +290,31 @@ impl PlayerSettings {
             args.push("--live-caching=300".to_string());
         } else if self.buffer_size_kb > 0 {
             args.push(format!("--network-caching={}", self.buffer_size_kb));
+        } else {
+            // Default network caching for streams
+            args.push("--network-caching=1000".to_string());
         }
         
-        // Additional VLC options for Netflix-style seamless playback
-        args.push("--fullscreen".to_string());           // Start in fullscreen
-        args.push("--play-and-exit".to_string());        // Exit when done
+        // Additional VLC options for seamless playback
         args.push("--no-video-title-show".to_string());  // No title overlay
-        args.push("--no-playlist-enqueue".to_string());  // Don't enqueue, just play
-        args.push("--one-instance".to_string());         // Use single VLC instance
-        args.push("--no-qt-video-autoresize".to_string()); // Don't resize window
         args.push("--mouse-hide-timeout=1500".to_string()); // Quick mouse hide
+        
+        // Platform-specific options
+        #[cfg(not(windows))]
+        {
+            // Linux: Avoid problematic options
+            args.push("--no-one-instance".to_string());
+            args.push("--started-from-file".to_string());  // Treat as file/stream
+        }
+        
+        #[cfg(windows)]
+        {
+            args.push("--fullscreen".to_string());           // Start in fullscreen
+            args.push("--play-and-exit".to_string());        // Exit when done
+            args.push("--no-playlist-enqueue".to_string());  // Don't enqueue, just play
+            args.push("--one-instance".to_string());         // Use single VLC instance
+            args.push("--no-qt-video-autoresize".to_string()); // Don't resize window
+        }
         
         args
     }
@@ -597,14 +612,26 @@ impl PlayerSettings {
                 cmd.arg(url);
             }
             PlayerType::VLC => {
-                cmd.arg(format!("--meta-title={}", title));
-                for arg in self.build_vlc_args() {
-                    cmd.arg(arg);
+                // VLC on Linux needs URL first, then options work better
+                #[cfg(not(windows))]
+                {
+                    cmd.arg(url);
+                    cmd.arg(format!("--meta-title={}", title));
+                    for arg in self.build_vlc_args() {
+                        cmd.arg(arg);
+                    }
+                    cmd.arg("--http-user-agent=IPTV-Player/1.0");
                 }
-                // Add user-agent for IPTV compatibility
-                cmd.arg("--http-user-agent=IPTV-Player/1.0");
-                cmd.arg("--");
-                cmd.arg(url);
+                
+                #[cfg(windows)]
+                {
+                    cmd.arg(format!("--meta-title={}", title));
+                    for arg in self.build_vlc_args() {
+                        cmd.arg(arg);
+                    }
+                    cmd.arg("--http-user-agent=IPTV-Player/1.0");
+                    cmd.arg(url);
+                }
             }
             PlayerType::MPV => {
                 cmd.arg(format!("--title={}", title));
