@@ -17,3 +17,10 @@ dirs = "5.0"
 urlencoding = "2.1"
 rusqlite = { version = "0.31", features = ["bundled"] }
 chrono = "0.4"
+
+[features]
+default = []
+bundle-media-tools = []
+
+[build-dependencies]
+# Build script runs without additional dependencies

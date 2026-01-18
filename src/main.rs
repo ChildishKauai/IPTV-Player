@@ -21,6 +21,7 @@
 use eframe::egui;
 
 mod api;
+mod media_tools;
 mod models;
 mod m3u;
 mod ui;

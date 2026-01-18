@@ -272,8 +272,12 @@ impl PlayerSettings {
         }
         
         // Volume (VLC uses 0-512, with 256 being 100%)
+        // Note: --volume is deprecated in newer VLC versions and may cause warnings/errors.
+        // It's better to rely on system volume or UI control.
+        /*
         let vlc_volume = (self.volume as f32 * 2.56) as i32;
         args.push(format!("--volume={}", vlc_volume));
+        */
         
         // Hardware acceleration
         if self.hardware_acceleration {
