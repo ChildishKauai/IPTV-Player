@@ -42,6 +42,8 @@ impl PlayerType {
             PlayerType::FFplay => vec![
                 "ffplay",
                 "ffplay.exe",
+                "bundled/ffplay.exe",
+                "bundled\\ffplay.exe",
             ],
             PlayerType::VLC => vec![
                 "vlc",
@@ -51,6 +53,8 @@ impl PlayerType {
             PlayerType::MPV => vec![
                 "mpv",
                 "mpv.exe",
+                "bundled/mpv.exe",
+                "bundled\\mpv.exe",
                 "C:\\Program Files\\mpv\\mpv.exe",
                 "C:\\Program Files (x86)\\mpv\\mpv.exe",
                 "C:\\Program Files\\Open TV\\deps\\mpv.exe",
