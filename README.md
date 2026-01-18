@@ -1,20 +1,22 @@
-﻿# IPTV Player - Rust Edition
+# IPTV Player - Rust Edition
 
-A high-performance IPTV player built with Rust and egui for fast, native UI experience.
+A high-performance IPTV player built with Rust and egui for fast, native UI experience. Netflix-inspired dark theme with touch-friendly controls for Steam Deck and desktop.
 
-## Features (Planned)
+## Features
 
--  Modern, native UI with egui framework
--  Xtream Codes API support
--  M3U/M3U8 playlist parsing
--  Category browsing
--  Search functionality
--  Favorites system
--  Video playback with mpv
--  Playback controls (play, pause, skip)
--  Audio/subtitle track selection
--  Credential persistence
--  Resizable window
+- ✅ Modern, native UI with egui framework
+- ✅ Xtream Codes API support
+- ✅ M3U/M3U8 playlist parsing
+- ✅ Category browsing (Live TV, Movies, Series)
+- ✅ Search functionality
+- ✅ Favorites system
+- ✅ Video playback with mpv/vlc/ffmpeg
+- ✅ EPG (Electronic Program Guide) support
+- ✅ Image caching
+- ✅ Credential persistence
+- ✅ Responsive design (mobile/desktop)
+- ✅ Steam Deck support with bundled media tools
+- ✅ Football fixtures scraper integration
 
 ## Technology Stack
 
@@ -23,69 +25,96 @@ A high-performance IPTV player built with Rust and egui for fast, native UI expe
 - **Async Runtime**: tokio 1.x
 - **Serialization**: serde + serde_json
 - **Image Loading**: image 0.25
+- **Database**: rusqlite (bundled SQLite)
 - **Config Storage**: dirs 5.0
-- **Video Playback**: TBD (mpv or gstreamer bindings)
+- **Video Playback**: mpv, vlc, ffmpeg (bundled for Steam Deck)
 
-## Build Instructions
+## Quick Start
 
-### Prerequisites
-- Rust 1.70+ (install from https://rustup.rs/)
-- C++ compiler (MSVC on Windows, GCC/Clang on Linux)
+```bash
+# Clone the repository
+git clone https://github.com/ChildishKauai/IPTV-Player.git
+cd IPTV-Player
 
-### Building
-\\\ash
-# Clone or navigate to project directory
-cd iptv-player-rust
-
-# Build in debug mode
-cargo build
-
-# Build in release mode (optimized)
-cargo build --release
-
-# Run the application
-cargo run
-
-# Run in release mode
+# Build and run
 cargo run --release
-\\\
+```
+
+### Steam Deck Build
+
+```bash
+# On Steam Deck, bundle media tools first
+./scripts/bundle-media-tools.sh
+cargo build --release --features bundle-media-tools
+```
+
+See [docs/STEAM_DECK_BUILD.md](docs/STEAM_DECK_BUILD.md) for detailed instructions.
 
 ## Project Structure
 
-\\\
+```
 iptv-player-rust/
- src/
-    main.rs          # Entry point with basic egui UI
- Cargo.toml           # Dependencies and project metadata
- README.md            # This file
-\\\
+├── src/
+│   ├── main.rs              # Entry point
+│   ├── m3u.rs               # M3U playlist parser
+│   ├── media_tools.rs       # FFmpeg/VLC/MPV manager
+│   ├── api/                 # API clients
+│   │   ├── xtream.rs        # Xtream Codes API
+│   │   ├── football.rs      # Football API
+│   │   ├── tmdb.rs          # TMDB metadata
+│   │   └── scraper_integration.rs
+│   ├── models/              # Data types
+│   │   ├── types.rs         # Channel, Movie, Series
+│   │   ├── config.rs        # User configuration
+│   │   └── watch_history.rs
+│   └── ui/                  # UI components
+│       ├── app.rs           # Main app state
+│       ├── theme.rs         # Netflix-inspired theme
+│       ├── image_cache.rs   # Async image loading
+│       └── components/      # Reusable UI components
+├── docs/                    # Documentation
+│   ├── ARCHITECTURE.txt     # Design rationale
+│   ├── STEAM_DECK_BUILD.md  # Steam Deck setup
+│   ├── XTREAM_API_GUIDE.md  # API reference
+│   └── ...
+├── scripts/                 # Build scripts
+│   ├── bundle-media-tools.sh   # Steam Deck bundler
+│   └── bundle-media-tools.bat  # Windows helper
+├── tests/                   # Tests and fixtures
+│   ├── fixtures/            # Sample API responses
+│   └── xtream_api_test.rs
+├── Soccer-Scraper-main/     # Football fixture scraper
+├── examples/                # Example code
+├── Cargo.toml               # Dependencies
+└── README.md
+```
 
-## Development Roadmap
+## Documentation
 
-1.  Basic project setup with egui
-2.  Compile and test basic UI (in progress)
-3.  Implement Xtream Codes API client
-4.  Add M3U playlist parsing
-5.  Design main UI layout (sidebar, content, search)
-6.  Integrate video player (mpv)
-7.  Add favorites and persistence
-8.  Implement playback controls
-9.  Add audio/subtitle selection
-10.  Testing and optimization
+| Document | Description |
+|----------|-------------|
+| [ARCHITECTURE.txt](docs/ARCHITECTURE.txt) | Design rationale and architecture |
+| [STEAM_DECK_BUILD.md](docs/STEAM_DECK_BUILD.md) | Steam Deck build instructions |
+| [XTREAM_API_GUIDE.md](docs/XTREAM_API_GUIDE.md) | Xtream Codes API reference |
+| [DEVELOPMENT_GUIDE.md](docs/DEVELOPMENT_GUIDE.md) | Development guidelines |
+| [M3U_PARSING.md](docs/M3U_PARSING.md) | M3U parsing documentation |
 
-## Comparison with Python Version
+## Development
 
-### Advantages
-- **Performance**: Native compiled code, no GIL limitations
-- **Memory**: Lower memory footprint
-- **Startup**: Faster application startup
-- **UI**: Hardware-accelerated rendering with egui
-- **Dependencies**: Single binary output, no Python runtime needed
+```bash
+# Fast error checking
+cargo check
 
-### Current Status
-- Python version: Fully functional with CustomTkinter
-- Rust version: In development, basic UI scaffold complete
+# Run tests
+cargo test
+
+# Format code
+cargo fmt
+
+# Build optimized release
+cargo build --release
+```
 
 ## License
 
-TBD
+MIT License - see LICENSE file for details.

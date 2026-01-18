@@ -22,6 +22,15 @@ pub enum AppMessage {
     
     /// Movies data loaded successfully
     MoviesLoaded(Vec<Category>, Vec<serde_json::Value>),
+    
+    /// Scraper started
+    ScraperStarted,
+    
+    /// Scraper completed successfully
+    ScraperCompleted(String),
+    
+    /// Scraper failed with error
+    ScraperFailed(String),
 }
 
 /// Content type currently being displayed in the main view.

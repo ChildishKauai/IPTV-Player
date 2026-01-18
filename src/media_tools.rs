@@ -3,7 +3,7 @@
 //! Handles detection and execution of bundled ffmpeg, vlc, and mpv
 //! for Steam Deck deployments.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::Command;
 use anyhow::{Result, Context};
 

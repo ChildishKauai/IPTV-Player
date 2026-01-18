@@ -1,1 +1,49 @@
+# Build outputs
 /target
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Rust
+**/*.rs.bk
+Cargo.lock
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Python (Soccer-Scraper)
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+*.egg-info/
+.venv/
+venv/
+ENV/
+
+# Logs and databases
+*.log
+*.db
+*.sqlite
+*.sqlite3
+
+# Config (user-specific)
+.iptv_player_config.json
+
+# Media tools output (runtime generated)
+/media-tools/
+
+# Temporary files
+*.tmp
+*.temp
+*.bak

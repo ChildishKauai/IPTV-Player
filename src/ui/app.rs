@@ -144,6 +144,10 @@ pub struct IPTVPlayerApp {
     scraper_manager: ScraperManager,
     /// Whether the scraper settings dialog is open
     show_scraper_settings: bool,
+    /// Whether scraper is currently running
+    scraping_in_progress: bool,
+    /// Last scraper result message
+    scraper_message: Option<String>,
 }
 
 impl IPTVPlayerApp {
@@ -194,6 +198,8 @@ impl IPTVPlayerApp {
             watch_history: crate::models::WatchHistory::load(),
             scraper_manager: ScraperManager::new(),
             show_scraper_settings: false,
+            scraping_in_progress: false,
+            scraper_message: None,
         };
         
         // Auto-login if credentials are saved
@@ -641,9 +647,81 @@ impl IPTVPlayerApp {
                         self.all_movies = movies;
                         self.filtered_movies = self.all_movies.clone();
                     }
+                    AppMessage::ScraperStarted => {
+                        self.scraping_in_progress = true;
+                        self.scraper_message = Some("Scraping fixtures...".to_string());
+                    }
+                    AppMessage::ScraperCompleted(msg) => {
+                        self.scraping_in_progress = false;
+                        self.scraper_message = Some(msg);
+                        self.football_cache.clear(); // Refresh the cache
+                    }
+                    AppMessage::ScraperFailed(err) => {
+                        self.scraping_in_progress = false;
+                        self.scraper_message = Some(format!("Error: {}", err));
+                    }
                 }
             }
         }
+    }
+    
+    /// Triggers the football fixtures scraper in a background thread
+    fn trigger_scraper(&mut self) {
+        if self.scraping_in_progress {
+            return; // Already running
+        }
+        
+        // Need a valid sender to receive results
+        let tx = match &self.tx {
+            Some(tx) => tx.clone(),
+            None => return, // No sender available
+        };
+        
+        self.scraping_in_progress = true;
+        self.scraper_message = Some("Starting scraper...".to_string());
+        
+        thread::spawn(move || {
+            // Determine Python executable path (cross-platform)
+            let python_path = if cfg!(windows) {
+                "Soccer-Scraper-main\\.venv\\Scripts\\python.exe"
+            } else {
+                "Soccer-Scraper-main/.venv/bin/python"
+            };
+            
+            // Try venv Python first, fall back to system Python
+            let python_cmd = if std::path::Path::new(python_path).exists() {
+                python_path.to_string()
+            } else if cfg!(windows) {
+                "python".to_string()
+            } else {
+                "python3".to_string()
+            };
+            
+            let result = std::process::Command::new(&python_cmd)
+                .args(["fixtures.py", "scrape"])
+                .current_dir("Soccer-Scraper-main")
+                .output();
+            
+            match result {
+                Ok(output) => {
+                    if output.status.success() {
+                        let _ = tx.send(AppMessage::ScraperCompleted(
+                            "Fixtures updated successfully!".to_string()
+                        ));
+                    } else {
+                        let stderr = String::from_utf8_lossy(&output.stderr);
+                        let _ = tx.send(AppMessage::ScraperFailed(
+                            format!("Scraper failed: {}", stderr.lines().next().unwrap_or("Unknown error"))
+                        ));
+                    }
+                }
+                Err(e) => {
+                    let _ = tx.send(AppMessage::ScraperFailed(
+                        format!("Failed to run scraper: {}. Ensure Python is installed.", e)
+                    ));
+                }
+            }
+        });
     }
     
     // ═══════════════════════════════════════════════════════════════════════
@@ -1064,6 +1142,43 @@ impl IPTVPlayerApp {
             .color(theme.text_secondary));
         ui.add_space(8.0);
         
+        // Refresh button and status - always visible at the top
+        ui.horizontal(|ui| {
+            let button_text = if self.scraping_in_progress {
+                "⏳ Scraping..."
+            } else {
+                "🔄 Refresh Fixtures"
+            };
+            
+            let button = egui::Button::new(
+                egui::RichText::new(button_text)
+                    .size(12.0)
+                    .color(egui::Color32::WHITE)
+            )
+            .fill(if self.scraping_in_progress { theme.text_secondary } else { theme.accent_blue })
+            .rounding(egui::Rounding::same(4.0))
+            .min_size(egui::vec2(130.0, 32.0));
+            
+            if ui.add_enabled(!self.scraping_in_progress, button).clicked() {
+                self.trigger_scraper();
+            }
+            
+            // Show status message
+            if let Some(msg) = &self.scraper_message {
+                ui.add_space(8.0);
+                let color = if msg.starts_with("Error") {
+                    theme.error_color
+                } else if msg.contains("successfully") {
+                    theme.success_color
+                } else {
+                    theme.text_secondary
+                };
+                ui.label(egui::RichText::new(msg).size(11.0).color(color));
+            }
+        });
+        
+        ui.add_space(8.0);
+        
         // Check if database exists
         if !self.football_cache.has_database() {
             ui.vertical_centered(|ui| {
@@ -1076,29 +1191,9 @@ impl IPTVPlayerApp {
                     .size(18.0)
                     .color(theme.text_primary));
                 ui.add_space(8.0);
-                ui.label(egui::RichText::new("Click the button below to fetch upcoming fixtures")
+                ui.label(egui::RichText::new("Click 'Refresh Fixtures' above to fetch upcoming matches")
                     .size(12.0)
                     .color(theme.text_secondary));
-                ui.add_space(16.0);
-                if ui.add(
-                    egui::Button::new(
-                        egui::RichText::new("⚽ Fetch Fixtures")
-                            .size(14.0)
-                            .color(egui::Color32::WHITE)
-                    )
-                    .fill(theme.accent_blue)
-                    .rounding(egui::Rounding::same(4.0))
-                    .min_size(egui::vec2(140.0, 36.0))
-                ).clicked() {
-                    // Run the scraper in background using venv Python
-                    std::thread::spawn(|| {
-                        let _ = std::process::Command::new(".venv\\Scripts\\python.exe")
-                            .args(["fixtures.py", "scrape"])
-                            .current_dir("Soccer-Scraper-main")
-                            .spawn();
-                    });
-                    self.football_cache.clear();
-                }
             });
             return;
         }
@@ -1521,24 +1616,18 @@ impl eframe::App for IPTVPlayerApp {
                             ui.add_space(16.0);
                             
                             // Refresh button - runs the scraper
-                            if ui.add(
-                                egui::Button::new(
-                                    egui::RichText::new("🔄 Refresh")
-                                        .size(12.0)
-                                        .color(egui::Color32::WHITE)
-                                )
-                                .fill(theme.accent_blue)
-                                .rounding(egui::Rounding::same(4.0))
-                                .min_size(egui::vec2(100.0, 32.0))
-                            ).clicked() {
-                                // Run the scraper in background using venv Python
-                                std::thread::spawn(|| {
-                                    let _ = std::process::Command::new(".venv\\Scripts\\python.exe")
-                                        .args(["fixtures.py", "scrape"])
-                                        .current_dir("Soccer-Scraper-main")
-                                        .spawn();
-                                });
-                                self.football_cache.clear();
+                            let btn_text = if self.scraping_in_progress { "⏳ Scraping..." } else { "🔄 Refresh" };
+                            let button = egui::Button::new(
+                                egui::RichText::new(btn_text)
+                                    .size(12.0)
+                                    .color(egui::Color32::WHITE)
+                            )
+                            .fill(if self.scraping_in_progress { theme.text_secondary } else { theme.accent_blue })
+                            .rounding(egui::Rounding::same(4.0))
+                            .min_size(egui::vec2(100.0, 32.0));
+                            
+                            if ui.add_enabled(!self.scraping_in_progress, button).clicked() {
+                                self.trigger_scraper();
                             }
                         } else if matches!(self.current_content, ContentType::Discover) {
                             // Show TMDB category selector in sidebar for Discover mode
@@ -1714,33 +1803,58 @@ impl eframe::App for IPTVPlayerApp {
             // Scraper settings dialog
             if self.show_scraper_settings {
                 let mut should_close = false;
+                let mut should_trigger = false;
                 egui::Window::new("Football Fixtures Scraper")
                     .open(&mut self.show_scraper_settings)
                     .resizable(true)
                     .default_width(400.0)
                     .show(ctx, |ui| {
-                        let scraper_status = self.scraper_manager.status();
-                        if let Some(action) = ScraperSettingsDialog::show(
-                            ui,
-                            &theme,
-                            self.scraper_manager.is_available(),
-                            &scraper_status,
-                        ) {
-                            match action {
-                                scraper_settings::ScraperAction::TriggerScrape => {
-                                    // Spawn background thread for scraping
-                                    let mut mgr = ScraperManager::new();
-                                    thread::spawn(move || {
-                                        let _ = mgr.scrape_blocking();
-                                    });
-                                }
-                                scraper_settings::ScraperAction::Close => {
-                                    should_close = true;
-                                }
+                        // Show current scraping status
+                        ui.heading("📊 Football Fixtures Scraper");
+                        ui.separator();
+                        
+                        if !self.scraper_manager.is_available() {
+                            ui.label(egui::RichText::new("⚠️ Soccer Scraper not found")
+                                .color(theme.warning_color));
+                            ui.label("Ensure Soccer-Scraper-main directory exists in the app folder");
+                        } else if self.scraping_in_progress {
+                            ui.label(egui::RichText::new("⏳ Scraping in progress...")
+                                .color(theme.accent_blue));
+                            ui.label("Opening Chrome browser to bypass Cloudflare...");
+                            ui.label("Please wait, this may take 2 minutes");
+                        } else {
+                            ui.label("✅ Scraper ready");
+                            ui.label("Click below to download today's fixtures from LiveSoccerTV");
+                            
+                            ui.add_space(8.0);
+                            if ui.button("🔄 Scrape Fixtures Now").clicked() {
+                                should_trigger = true;
                             }
+                            ui.label("⏱️ Takes approximately 2 minutes");
+                        }
+                        
+                        // Show last message
+                        if let Some(msg) = &self.scraper_message {
+                            ui.add_space(8.0);
+                            let color = if msg.starts_with("Error") {
+                                theme.error_color
+                            } else if msg.contains("successfully") {
+                                theme.success_color
+                            } else {
+                                theme.text_secondary
+                            };
+                            ui.label(egui::RichText::new(msg).color(color));
+                        }
+                        
+                        ui.separator();
+                        if ui.button("Close").clicked() {
+                            should_close = true;
                         }
                     });
                 
+                if should_trigger {
+                    self.trigger_scraper();
+                }
                 if should_close {
                     self.show_scraper_settings = false;
                 }
