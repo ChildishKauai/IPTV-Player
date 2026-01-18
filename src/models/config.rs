@@ -573,6 +573,9 @@ impl PlayerSettings {
     pub fn launch_player(&self, url: &str, title: &str, is_live: bool) -> std::io::Result<std::process::Child> {
         let executable = self.get_player_executable();
         
+        // Trim URL to remove any leading/trailing whitespace
+        let url = url.trim();
+        
         // Log the command for debugging
         eprintln!("[Player] Launching: {} with URL: {}", executable, url);
         

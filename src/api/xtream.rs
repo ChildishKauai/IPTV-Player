@@ -11,8 +11,10 @@ pub struct XtreamClient {
 
 impl XtreamClient {
     pub fn new(server_url: String, username: String, password: String) -> Self {
-        // Remove trailing slash from server URL if present
-        let base_url = server_url.trim_end_matches('/').to_string();
+        // Trim whitespace and remove trailing slash from server URL
+        let base_url = server_url.trim().trim_end_matches('/').to_string();
+        let username = username.trim().to_string();
+        let password = password.trim().to_string();
         
         // Create client with timeout and redirect settings
         let client = reqwest::blocking::Client::builder()
