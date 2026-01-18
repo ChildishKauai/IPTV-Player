@@ -127,7 +127,8 @@ impl TmdbItem {
     /// Get the year from the release date.
     pub fn year(&self) -> Option<String> {
         if self.release_date.len() >= 4 {
-            Some(self.release_date[..4].to_string())
+            // Safe slice for ASCII date format YYYY-MM-DD
+            Some(self.release_date.chars().take(4).collect())
         } else {
             None
         }

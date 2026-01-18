@@ -251,8 +251,9 @@ impl EpisodeDialog {
                                 // Plot (truncated)
                                 if !data.plot.is_empty() {
                                     ui.add_space(8.0);
-                                    let plot_display = if data.plot.len() > 250 {
-                                        format!("{}...", &data.plot[..250])
+                                    let plot_display = if data.plot.chars().count() > 250 {
+                                        let truncated: String = data.plot.chars().take(250).collect();
+                                        format!("{}...", truncated)
                                     } else {
                                         data.plot.clone()
                                     };
@@ -325,8 +326,9 @@ impl EpisodeDialog {
                                                                 ui.add_space(16.0);
                                                                 
                                                                 // Episode title
-                                                                let title_display = if ep.title.len() > 50 {
-                                                                    format!("{}...", &ep.title[..50])
+                                                                let title_display = if ep.title.chars().count() > 50 {
+                                                                    let truncated: String = ep.title.chars().take(50).collect();
+                                                                    format!("{}...", truncated)
                                                                 } else {
                                                                     ep.title.clone()
                                                                 };

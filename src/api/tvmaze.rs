@@ -86,10 +86,11 @@ impl DiscoverItem {
                     .replace("<i>", "").replace("</i>", "")
                     .replace("<br>", "\n").replace("<br/>", "\n")
                     .replace("&amp;", "&").replace("&quot;", "\"");
-                // Remove any remaining HTML tags
+                // Remove any remaining HTML tags (Unicode-safe: find returns byte positions that are valid char boundaries for ASCII '<' and '>')
                 while let Some(start) = clean.find('<') {
-                    if let Some(end) = clean[start..].find('>') {
-                        clean = format!("{}{}", &clean[..start], &clean[start + end + 1..]);
+                    if let Some(relative_end) = clean[start..].find('>') {
+                        let end = start + relative_end;
+                        clean = format!("{}{}", &clean[..start], &clean[end + 1..]);
                     } else {
                         break;
                     }
