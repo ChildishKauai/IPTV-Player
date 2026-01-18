@@ -273,7 +273,7 @@ impl XtreamClient {
 
     pub fn get_live_stream_url(&self, stream_id: &str) -> String {
         format!(
-            "{}/{}/{}/{}.ts",
+            "{}/live/{}/{}/{}.ts",
             self.base_url, self.username, self.password, stream_id
         )
     }

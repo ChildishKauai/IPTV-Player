@@ -558,6 +558,9 @@ impl PlayerSettings {
     pub fn launch_player(&self, url: &str, title: &str, is_live: bool) -> std::io::Result<std::process::Child> {
         let executable = self.get_player_executable();
         
+        // Log the command for debugging
+        eprintln!("[Player] Launching: {} with URL: {}", executable, url);
+        
         // Create command - GUI players need to show their window, don't use CREATE_NO_WINDOW
         // Only use DETACHED_PROCESS to separate from our console
         #[cfg(windows)]
@@ -571,7 +574,15 @@ impl PlayerSettings {
         };
         
         #[cfg(not(windows))]
-        let mut cmd = std::process::Command::new(&executable);
+        let mut cmd = {
+            use std::process::Stdio;
+            let mut c = std::process::Command::new(&executable);
+            // Properly detach from parent process on Linux
+            c.stdin(Stdio::null());
+            c.stdout(Stdio::null());
+            c.stderr(Stdio::inherit()); // Keep stderr for debugging
+            c
+        };
         
         match self.player_type {
             PlayerType::FFplay => {
@@ -590,6 +601,9 @@ impl PlayerSettings {
                 for arg in self.build_vlc_args() {
                     cmd.arg(arg);
                 }
+                // Add user-agent for IPTV compatibility
+                cmd.arg("--http-user-agent=IPTV-Player/1.0");
+                cmd.arg("--");
                 cmd.arg(url);
             }
             PlayerType::MPV => {
@@ -597,6 +611,10 @@ impl PlayerSettings {
                 for arg in self.build_mpv_args() {
                     cmd.arg(arg);
                 }
+                // Add user-agent for IPTV compatibility
+                cmd.arg("--user-agent=IPTV-Player/1.0");
+                // Use -- to separate options from URL
+                cmd.arg("--");
                 cmd.arg(url);
             }
             PlayerType::MpcHc => {
