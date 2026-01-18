@@ -198,19 +198,29 @@ impl TopNavigation {
             });
         });
         
-        // Mobile search bar (below nav)
-        if is_mobile {
-            ui.add_space(8.0);
+        // Mobile/Touch search bar (below nav) - shown for mobile OR touch mode (Steam Deck)
+        if is_mobile || is_touch_mode {
+            ui.add_space(if is_touch_mode { 12.0 } else { 8.0 });
+            let inner_margin = if is_touch_mode { 
+                egui::Margin::symmetric(14.0, 12.0) 
+            } else { 
+                egui::Margin::symmetric(10.0, 8.0) 
+            };
+            let icon_size = if is_touch_mode { 20.0 } else { 16.0 };
+            let font_size = if is_touch_mode { 18.0 } else { 14.0 };
+            
             egui::Frame::none()
                 .fill(theme.inactive_bg())
-                .rounding(egui::Rounding::same(4.0))
-                .inner_margin(egui::Margin::symmetric(10.0, 8.0))
+                .rounding(egui::Rounding::same(6.0))
+                .inner_margin(inner_margin)
                 .show(ui, |ui| {
                     ui.horizontal(|ui| {
-                        ui.label(egui::RichText::new("🔍").color(theme.text_secondary));
+                        ui.label(egui::RichText::new("🔍").size(icon_size).color(theme.text_secondary));
+                        ui.add_space(8.0);
                         let search_edit = egui::TextEdit::singleline(search_query)
-                            .hint_text("Search...")
-                            .desired_width(ui.available_width() - 30.0)
+                            .hint_text(egui::RichText::new("Search channels, movies, series...").size(font_size))
+                            .desired_width(ui.available_width() - 40.0)
+                            .font(egui::TextStyle::Body)
                             .frame(false);
                         if ui.add(search_edit).changed() {
                             action = Some(NavAction::SearchChanged);
