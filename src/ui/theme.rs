@@ -214,11 +214,11 @@ pub mod dimensions {
     pub const MOVIE_CARD_WIDTH: f32 = 180.0;
     pub const MOVIE_CARD_HEIGHT: f32 = 270.0;
     
-    /// Steam Deck optimized card dimensions (larger for touch)
-    pub const STEAM_DECK_CARD_WIDTH: f32 = 220.0;
-    pub const STEAM_DECK_CARD_HEIGHT: f32 = 150.0;
-    pub const STEAM_DECK_SERIES_CARD_WIDTH: f32 = 200.0;
-    pub const STEAM_DECK_SERIES_CARD_HEIGHT: f32 = 300.0;
+    /// Steam Deck optimized card dimensions (compact but still touch-friendly)
+    pub const STEAM_DECK_CARD_WIDTH: f32 = 160.0;
+    pub const STEAM_DECK_CARD_HEIGHT: f32 = 110.0;
+    pub const STEAM_DECK_SERIES_CARD_WIDTH: f32 = 140.0;
+    pub const STEAM_DECK_SERIES_CARD_HEIGHT: f32 = 210.0;
     
     /// Image dimensions - taller poster ratio like Netflix
     pub const CHANNEL_ICON_SIZE: f32 = 80.0;
@@ -227,21 +227,21 @@ pub mod dimensions {
     
     /// Sidebar dimensions
     pub const SIDEBAR_WIDTH: f32 = 200.0;
-    pub const STEAM_DECK_SIDEBAR_WIDTH: f32 = 240.0;
+    pub const STEAM_DECK_SIDEBAR_WIDTH: f32 = 180.0;
     pub const CATEGORY_BUTTON_WIDTH: f32 = 175.0;
     pub const CATEGORY_BUTTON_HEIGHT: f32 = 40.0;
-    pub const STEAM_DECK_CATEGORY_BUTTON_HEIGHT: f32 = 52.0;
+    pub const STEAM_DECK_CATEGORY_BUTTON_HEIGHT: f32 = 44.0;
     
-    /// Button dimensions - Steam Deck friendly (larger touch targets)
+    /// Button dimensions - Steam Deck friendly (touch targets)
     pub const BUTTON_HEIGHT: f32 = 44.0;
     pub const SMALL_BUTTON_SIZE: f32 = 44.0;
-    /// Steam Deck minimum touch target (56px for comfortable touch/controller)
-    pub const STEAM_DECK_BUTTON_HEIGHT: f32 = 56.0;
-    pub const STEAM_DECK_TOUCH_TARGET: f32 = 56.0;
+    /// Steam Deck touch target (48px - still comfortable but more compact)
+    pub const STEAM_DECK_BUTTON_HEIGHT: f32 = 48.0;
+    pub const STEAM_DECK_TOUCH_TARGET: f32 = 48.0;
     
     /// Pagination
     pub const DEFAULT_PAGE_SIZE: usize = 30;
-    pub const STEAM_DECK_PAGE_SIZE: usize = 18; // Fewer items for larger cards
+    pub const STEAM_DECK_PAGE_SIZE: usize = 24; // More items with smaller cards
     
     /// Check if likely running on Steam Deck (based on screen dimensions)
     pub fn is_steam_deck(screen_width: f32, screen_height: f32) -> bool {
