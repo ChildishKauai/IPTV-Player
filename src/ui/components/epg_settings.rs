@@ -1,6 +1,9 @@
-//! EPG settings dialog for configuring external EPG sources.
+//! EPG settings dialog - Modern, clean design
+//!
+//! Configure external EPG sources with a premium settings experience.
 
 use eframe::egui;
+use crate::ui::theme::{spacing, typography, radius};
 
 /// Actions returned by the EPG settings dialog.
 #[derive(Debug, Clone)]
@@ -11,12 +14,11 @@ pub enum EpgSettingsAction {
     Cancelled,
 }
 
-/// EPG settings dialog component.
+/// EPG settings dialog component - Modern design
 pub struct EpgSettingsDialog;
 
 impl EpgSettingsDialog {
     /// Shows the EPG settings dialog.
-    /// Returns an action if the dialog was closed.
     pub fn show(
         ctx: &egui::Context,
         epg_enabled: &mut bool,
@@ -24,180 +26,245 @@ impl EpgSettingsDialog {
     ) -> Option<EpgSettingsAction> {
         let mut action = None;
 
-        egui::Window::new("EPG Settings")
+        // Colors
+        let bg = egui::Color32::from_rgb(18, 18, 18);
+        let card_bg = egui::Color32::from_rgb(28, 28, 28);
+        let text_primary = egui::Color32::WHITE;
+        let text_secondary = egui::Color32::from_rgb(170, 170, 170);
+        let text_tertiary = egui::Color32::from_rgb(128, 128, 128);
+        let accent = egui::Color32::from_rgb(255, 90, 95);
+        let info_bg = egui::Color32::from_rgb(20, 35, 50);
+
+        egui::Window::new("")
             .resizable(false)
             .collapsible(false)
-            .default_width(500.0)
+            .title_bar(false)
+            .default_width(520.0)
             .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-            .frame(egui::Frame::none()
-                .fill(egui::Color32::from_rgb(24, 24, 24))
-                .rounding(egui::Rounding::same(8.0))
-                .inner_margin(egui::Margin::same(24.0)))
+            .frame(
+                egui::Frame::none()
+                    .fill(bg)
+                    .rounding(egui::Rounding::same(radius::XL))
+                    .inner_margin(egui::Margin::same(spacing::XL))
+                    .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(38, 38, 38))),
+            )
             .show(ctx, |ui| {
                 // Header
                 ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new("📺 EPG Configuration")
-                        .size(22.0)
-                        .color(egui::Color32::WHITE)
-                        .strong());
+                    ui.label(
+                        egui::RichText::new("EPG Settings")
+                            .size(typography::H1)
+                            .color(text_primary)
+                            .strong(),
+                    );
+
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.add(egui::Button::new(
-                            egui::RichText::new("✕").size(16.0).color(egui::Color32::WHITE)
-                        ).fill(egui::Color32::TRANSPARENT)).clicked() {
+                        if ui
+                            .add(
+                                egui::Button::new(
+                                    egui::RichText::new("✕")
+                                        .size(20.0)
+                                        .color(text_secondary),
+                                )
+                                .fill(egui::Color32::TRANSPARENT)
+                                .min_size(egui::vec2(40.0, 40.0)),
+                            )
+                            .clicked()
+                        {
                             action = Some(EpgSettingsAction::Cancelled);
                         }
                     });
                 });
 
-                ui.add_space(20.0);
+                ui.add_space(spacing::XL);
 
-                // EPG Enable Toggle
+                // Enable toggle section
                 egui::Frame::none()
-                    .fill(egui::Color32::from_rgb(35, 35, 35))
-                    .rounding(egui::Rounding::same(6.0))
-                    .inner_margin(egui::Margin::same(16.0))
+                    .fill(card_bg)
+                    .rounding(egui::Rounding::same(radius::LG))
+                    .inner_margin(egui::Margin::same(spacing::LG))
                     .show(ui, |ui| {
-                        ui.set_min_width(440.0);
+                        ui.set_min_width(460.0);
 
                         ui.horizontal(|ui| {
-                            ui.label(egui::RichText::new("Enable External EPG:")
-                                .color(egui::Color32::from_rgb(180, 180, 180)));
-                            ui.add_space(10.0);
-                            ui.checkbox(epg_enabled, "");
+                            ui.vertical(|ui| {
+                                ui.label(
+                                    egui::RichText::new("External EPG")
+                                        .size(typography::BODY)
+                                        .color(text_primary),
+                                );
+                                ui.label(
+                                    egui::RichText::new("Use XMLTV sources like EPGShare01")
+                                        .size(typography::CAPTION)
+                                        .color(text_tertiary),
+                                );
+                            });
+
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                ui.checkbox(epg_enabled, "");
+                            });
                         });
-
-                        ui.add_space(8.0);
-
-                        ui.label(egui::RichText::new("Enable this to use external XMLTV EPG sources (like EPGShare01)")
-                            .size(11.0)
-                            .color(egui::Color32::from_rgb(120, 120, 120)));
                     });
 
-                ui.add_space(12.0);
+                ui.add_space(spacing::MD);
 
-                // EPG URL Input
+                // URL input section
                 egui::Frame::none()
-                    .fill(egui::Color32::from_rgb(35, 35, 35))
-                    .rounding(egui::Rounding::same(6.0))
-                    .inner_margin(egui::Margin::same(16.0))
+                    .fill(card_bg)
+                    .rounding(egui::Rounding::same(radius::LG))
+                    .inner_margin(egui::Margin::same(spacing::LG))
                     .show(ui, |ui| {
-                        ui.set_min_width(440.0);
+                        ui.set_min_width(460.0);
 
-                        ui.label(egui::RichText::new("EPG URL:")
-                            .color(egui::Color32::from_rgb(180, 180, 180)));
+                        ui.label(
+                            egui::RichText::new("XMLTV URL")
+                                .size(typography::BODY_SM)
+                                .color(text_secondary),
+                        );
 
-                        ui.add_space(8.0);
+                        ui.add_space(spacing::SM);
 
                         let text_edit = egui::TextEdit::singleline(epg_url)
-                            .hint_text("https://epgshare01.online/epgshare01/epg_ripper_US2.xml.gz")
-                            .desired_width(420.0);
+                            .hint_text("https://epgshare01.online/...")
+                            .desired_width(ui.available_width() - spacing::SM)
+                            .font(egui::FontId::proportional(typography::BODY_SM));
 
                         ui.add_enabled(*epg_enabled, text_edit);
 
-                        ui.add_space(8.0);
+                        ui.add_space(spacing::SM);
 
-                        ui.label(egui::RichText::new("Enter XMLTV EPG URL. Supports .xml and .xml.gz formats.")
-                            .size(11.0)
-                            .color(egui::Color32::from_rgb(120, 120, 120)));
+                        ui.label(
+                            egui::RichText::new("Supports .xml and .xml.gz formats")
+                                .size(typography::LABEL)
+                                .color(text_tertiary),
+                        );
                     });
 
-                ui.add_space(12.0);
+                ui.add_space(spacing::MD);
 
-                // Quick Links
+                // Quick select section
                 egui::Frame::none()
-                    .fill(egui::Color32::from_rgb(35, 35, 35))
-                    .rounding(egui::Rounding::same(6.0))
-                    .inner_margin(egui::Margin::same(16.0))
+                    .fill(card_bg)
+                    .rounding(egui::Rounding::same(radius::LG))
+                    .inner_margin(egui::Margin::same(spacing::LG))
                     .show(ui, |ui| {
-                        ui.set_min_width(440.0);
+                        ui.set_min_width(460.0);
 
-                        ui.label(egui::RichText::new("📌 Popular EPG Sources (EPGShare01):")
-                            .color(egui::Color32::from_rgb(180, 180, 180))
-                            .strong());
+                        ui.label(
+                            egui::RichText::new("Quick Select")
+                                .size(typography::BODY)
+                                .color(text_primary),
+                        );
 
-                        ui.add_space(8.0);
+                        ui.add_space(spacing::MD);
 
-                        // Quick select buttons - EPGShare01 sources
-                        ui.horizontal(|ui| {
-                            if ui.button("🇺🇸 US").clicked() && *epg_enabled {
-                                *epg_url = "https://epgshare01.online/epgshare01/epg_ripper_US2.xml.gz".to_string();
-                            }
-                            if ui.button("🇬🇧 UK").clicked() && *epg_enabled {
-                                *epg_url = "https://epgshare01.online/epgshare01/epg_ripper_UK1.xml.gz".to_string();
-                            }
-                            if ui.button("🇫🇷 France").clicked() && *epg_enabled {
-                                *epg_url = "https://epgshare01.online/epgshare01/epg_ripper_FR1.xml.gz".to_string();
-                            }
-                            if ui.button("🇩🇪 Germany").clicked() && *epg_enabled {
-                                *epg_url = "https://epgshare01.online/epgshare01/epg_ripper_DE1.xml.gz".to_string();
+                        ui.horizontal_wrapped(|ui| {
+                            ui.spacing_mut().item_spacing = egui::vec2(spacing::SM, spacing::SM);
+
+                            let countries = [
+                                ("US", "epg_ripper_US2"),
+                                ("UK", "epg_ripper_UK1"),
+                                ("FR", "epg_ripper_FR1"),
+                                ("DE", "epg_ripper_DE1"),
+                                ("ES", "epg_ripper_ES1"),
+                                ("IT", "epg_ripper_IT1"),
+                                ("CA", "epg_ripper_CA2"),
+                                ("AU", "epg_ripper_AU1"),
+                            ];
+
+                            for (code, file) in countries {
+                                let btn = egui::Button::new(
+                                    egui::RichText::new(code)
+                                        .size(typography::BODY_SM)
+                                        .color(if *epg_enabled {
+                                            text_primary
+                                        } else {
+                                            text_tertiary
+                                        }),
+                                )
+                                .fill(if *epg_enabled {
+                                    egui::Color32::from_rgb(40, 40, 40)
+                                } else {
+                                    egui::Color32::from_rgb(30, 30, 30)
+                                })
+                                .min_size(egui::vec2(52.0, 36.0))
+                                .rounding(egui::Rounding::same(radius::MD));
+
+                                if ui.add_enabled(*epg_enabled, btn).clicked() {
+                                    *epg_url = format!(
+                                        "https://epgshare01.online/epgshare01/{}.xml.gz",
+                                        file
+                                    );
+                                }
                             }
                         });
 
-                        ui.horizontal(|ui| {
-                            if ui.button("🇪🇸 Spain").clicked() && *epg_enabled {
-                                *epg_url = "https://epgshare01.online/epgshare01/epg_ripper_ES1.xml.gz".to_string();
-                            }
-                            if ui.button("🇮🇹 Italy").clicked() && *epg_enabled {
-                                *epg_url = "https://epgshare01.online/epgshare01/epg_ripper_IT1.xml.gz".to_string();
-                            }
-                            if ui.button("🇨🇦 Canada").clicked() && *epg_enabled {
-                                *epg_url = "https://epgshare01.online/epgshare01/epg_ripper_CA2.xml.gz".to_string();
-                            }
-                            if ui.button("🇦🇺 Australia").clicked() && *epg_enabled {
-                                *epg_url = "https://epgshare01.online/epgshare01/epg_ripper_AU1.xml.gz".to_string();
-                            }
-                        });
+                        ui.add_space(spacing::SM);
 
-                        ui.add_space(8.0);
-
-                        ui.label(egui::RichText::new("Browse 60+ countries: epgshare01.online")
-                            .size(11.0)
-                            .color(egui::Color32::from_rgb(100, 100, 100)));
+                        ui.label(
+                            egui::RichText::new("More regions at epgshare01.online")
+                                .size(typography::LABEL)
+                                .color(text_tertiary),
+                        );
                     });
 
-                ui.add_space(16.0);
+                ui.add_space(spacing::MD);
 
                 // Info box
                 egui::Frame::none()
-                    .fill(egui::Color32::from_rgb(20, 40, 60))
-                    .rounding(egui::Rounding::same(6.0))
-                    .inner_margin(egui::Margin::same(12.0))
+                    .fill(info_bg)
+                    .rounding(egui::Rounding::same(radius::MD))
+                    .inner_margin(egui::Margin::same(spacing::MD))
                     .show(ui, |ui| {
-                        ui.set_min_width(440.0);
                         ui.horizontal_wrapped(|ui| {
-                            ui.label(egui::RichText::new("ℹ️").size(14.0));
-                            ui.label(egui::RichText::new(
-                                "External EPG supplements Xtream API. Channels with tvg-id will use external EPG first. M3U playlists with x-tvg-url auto-detect EPG."
-                            ).size(11.0).color(egui::Color32::from_rgb(180, 200, 220)));
+                            ui.label(
+                                egui::RichText::new(
+                                    "External EPG supplements Xtream API. Channels with tvg-id use external EPG first.",
+                                )
+                                .size(typography::CAPTION)
+                                .color(egui::Color32::from_rgb(150, 180, 210)),
+                            );
                         });
                     });
 
-                ui.add_space(16.0);
+                ui.add_space(spacing::XL);
 
                 // Action buttons
                 ui.horizontal(|ui| {
                     // Save button
-                    if ui.add(egui::Button::new(
-                        egui::RichText::new("Save")
-                            .color(egui::Color32::WHITE)
-                            .strong()
-                    ).fill(egui::Color32::from_rgb(0, 122, 255))
-                        .rounding(egui::Rounding::same(4.0))
-                        .min_size(egui::vec2(80.0, 36.0)))
-                        .clicked() {
+                    if ui
+                        .add(
+                            egui::Button::new(
+                                egui::RichText::new("Save")
+                                    .size(typography::BODY_SM)
+                                    .color(egui::Color32::WHITE)
+                                    .strong(),
+                            )
+                            .fill(accent)
+                            .rounding(egui::Rounding::same(radius::MD))
+                            .min_size(egui::vec2(100.0, 44.0)),
+                        )
+                        .clicked()
+                    {
                         action = Some(EpgSettingsAction::Saved);
                     }
 
-                    ui.add_space(8.0);
+                    ui.add_space(spacing::SM);
 
                     // Cancel button
-                    if ui.add(egui::Button::new(
-                        egui::RichText::new("Cancel")
-                            .color(egui::Color32::WHITE)
-                    ).fill(egui::Color32::from_rgb(60, 60, 60))
-                        .rounding(egui::Rounding::same(4.0))
-                        .min_size(egui::vec2(80.0, 36.0)))
-                        .clicked() {
+                    if ui
+                        .add(
+                            egui::Button::new(
+                                egui::RichText::new("Cancel")
+                                    .size(typography::BODY_SM)
+                                    .color(text_secondary),
+                            )
+                            .fill(card_bg)
+                            .rounding(egui::Rounding::same(radius::MD))
+                            .min_size(egui::vec2(100.0, 44.0)),
+                        )
+                        .clicked()
+                    {
                         action = Some(EpgSettingsAction::Cancelled);
                     }
                 });

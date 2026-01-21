@@ -1,117 +1,179 @@
-//! Pagination component for navigating through content pages (Netflix-style).
+//! Pagination component - Modern pill-style design
+//!
+//! Clean, minimal pagination with subtle hover effects.
+//! Inspired by modern web apps and Apple's design language.
 
 use eframe::egui;
-use crate::ui::theme::Theme;
+use crate::ui::theme::{Theme, spacing, typography, radius};
 
-/// Pagination component for navigating through pages of content.
+/// Pagination component - Modern design
 pub struct Pagination;
 
 impl Pagination {
-    /// Renders Netflix-style pagination controls with touch-friendly sizing.
+    /// Renders modern pagination controls.
     /// Returns the new page number if changed.
     pub fn show(
         ui: &mut egui::Ui,
         theme: &Theme,
         current_page: usize,
         total_pages: usize,
-        is_touch_mode: bool, // Steam Deck or tablet
+        is_touch_mode: bool,
     ) -> Option<usize> {
         if total_pages <= 1 {
             return None;
         }
-        
+
         let mut new_page: Option<usize> = None;
-        
+
         // Touch-friendly sizing
-        let btn_height = if is_touch_mode { 52.0 } else { 36.0 };
-        let page_btn_size = if is_touch_mode { 52.0 } else { 36.0 };
-        let font_size = if is_touch_mode { 15.0 } else { 13.0 };
-        let spacing = if is_touch_mode { 20.0 } else { 16.0 };
-        
-        ui.add_space(24.0);
+        let btn_height = if is_touch_mode { 48.0 } else { 40.0 };
+        let page_btn_size = if is_touch_mode { 44.0 } else { 36.0 };
+        let font_size = if is_touch_mode { typography::BODY } else { typography::BODY_SM };
+
+        ui.add_space(spacing::XL);
+
+        // Center the pagination
         ui.horizontal(|ui| {
-            ui.add_space(20.0);
-            
-            // Previous button - minimal Netflix style
+            // Calculate center offset
+            let available = ui.available_width();
+            let estimated_width = 400.0; // Approximate width of pagination
+            let offset = ((available - estimated_width) / 2.0).max(0.0);
+            ui.add_space(offset);
+
+            // Previous button
             let prev_enabled = current_page > 0;
-            let prev_color = if prev_enabled { theme.text_primary } else { theme.text_secondary };
-            let prev_bg = if prev_enabled { theme.inactive_bg() } else { egui::Color32::TRANSPARENT };
-            
-            let prev_btn = egui::Button::new(
-                egui::RichText::new("← Previous")
-                    .size(font_size)
-                    .color(prev_color)
-            )
-            .fill(prev_bg)
-            .rounding(egui::Rounding::same(6.0))
-            .min_size(egui::vec2(if is_touch_mode { 120.0 } else { 100.0 }, btn_height));
-            
-            if ui.add_enabled(prev_enabled, prev_btn).clicked() {
+            if Self::nav_button(ui, theme, "Previous", prev_enabled, btn_height, font_size, false) {
                 new_page = Some(current_page.saturating_sub(1));
             }
-            
-            ui.add_space(spacing);
-            
-            // Page dots / numbers (show up to 5 pages)
-            let start_page = if current_page < 2 { 0 } else { current_page.saturating_sub(2) };
+
+            ui.add_space(spacing::LG);
+
+            // Page numbers (show up to 5 pages)
+            let start_page = if current_page < 2 {
+                0
+            } else {
+                current_page.saturating_sub(2)
+            };
             let end_page = (start_page + 5).min(total_pages);
-            
-            for page in start_page..end_page {
-                let is_current = page == current_page;
-                let page_btn = if is_current {
-                    egui::Button::new(
-                        egui::RichText::new(format!("{}", page + 1))
+
+            // First page if not visible
+            if start_page > 0 {
+                if Self::page_button(ui, theme, 1, false, page_btn_size, font_size) {
+                    new_page = Some(0);
+                }
+                if start_page > 1 {
+                    ui.label(
+                        egui::RichText::new("...")
                             .size(font_size)
-                            .color(egui::Color32::WHITE)
-                    )
-                    .fill(theme.accent_blue)
-                    .min_size(egui::vec2(page_btn_size, page_btn_size))
-                    .rounding(egui::Rounding::same(6.0))
-                } else {
-                    egui::Button::new(
-                        egui::RichText::new(format!("{}", page + 1))
-                            .size(font_size)
-                            .color(theme.text_secondary)
-                    )
-                    .fill(egui::Color32::TRANSPARENT)
-                    .min_size(egui::vec2(page_btn_size, page_btn_size))
-                };
-                
-                if ui.add(page_btn).clicked() && !is_current {
-                    new_page = Some(page);
+                            .color(theme.text_muted),
+                    );
                 }
             }
-            
-            // Show ellipsis if there are more pages
-            if end_page < total_pages {
-                ui.label(egui::RichText::new("...").size(font_size + 1.0).color(theme.text_secondary));
+
+            // Page buttons
+            for page in start_page..end_page {
+                let is_current = page == current_page;
+                if Self::page_button(ui, theme, page + 1, is_current, page_btn_size, font_size) {
+                    if !is_current {
+                        new_page = Some(page);
+                    }
+                }
             }
-            
-            ui.add_space(spacing);
-            
-            // Next button - minimal Netflix style
+
+            // Last page if not visible
+            if end_page < total_pages {
+                if end_page < total_pages - 1 {
+                    ui.label(
+                        egui::RichText::new("...")
+                            .size(font_size)
+                            .color(theme.text_muted),
+                    );
+                }
+                if Self::page_button(ui, theme, total_pages, false, page_btn_size, font_size) {
+                    new_page = Some(total_pages - 1);
+                }
+            }
+
+            ui.add_space(spacing::LG);
+
+            // Next button
             let next_enabled = current_page < total_pages - 1;
-            let next_color = if next_enabled { theme.text_primary } else { theme.text_secondary };
-            let next_bg = if next_enabled { theme.inactive_bg() } else { egui::Color32::TRANSPARENT };
-            
-            let next_btn = egui::Button::new(
-                egui::RichText::new("Next →")
-                    .size(font_size)
-                    .color(next_color)
-            )
-            .fill(next_bg)
-            .rounding(egui::Rounding::same(6.0))
-            .min_size(egui::vec2(if is_touch_mode { 120.0 } else { 100.0 }, btn_height));
-            
-            if ui.add_enabled(next_enabled, next_btn).clicked() {
+            if Self::nav_button(ui, theme, "Next", next_enabled, btn_height, font_size, true) {
                 new_page = Some(current_page + 1);
             }
         });
-        
+
+        ui.add_space(spacing::MD);
+
         new_page
     }
-    
-    /// Renders pagination info text showing the range of items.
+
+    /// Creates a navigation button (Previous/Next)
+    fn nav_button(
+        ui: &mut egui::Ui,
+        theme: &Theme,
+        text: &str,
+        enabled: bool,
+        height: f32,
+        font_size: f32,
+        is_next: bool,
+    ) -> bool {
+        let text_color = if enabled {
+            theme.text_primary
+        } else {
+            theme.text_muted
+        };
+
+        let label = if is_next {
+            format!("{} →", text)
+        } else {
+            format!("← {}", text)
+        };
+
+        let btn = egui::Button::new(
+            egui::RichText::new(label)
+                .size(font_size)
+                .color(text_color),
+        )
+        .fill(if enabled {
+            theme.inactive_bg()
+        } else {
+            egui::Color32::TRANSPARENT
+        })
+        .rounding(egui::Rounding::same(radius::MD))
+        .min_size(egui::vec2(100.0, height));
+
+        ui.add_enabled(enabled, btn).clicked()
+    }
+
+    /// Creates a page number button
+    fn page_button(
+        ui: &mut egui::Ui,
+        theme: &Theme,
+        page_num: usize,
+        is_current: bool,
+        size: f32,
+        font_size: f32,
+    ) -> bool {
+        let (bg, fg) = if is_current {
+            (theme.accent_blue, egui::Color32::WHITE)
+        } else {
+            (egui::Color32::TRANSPARENT, theme.text_secondary)
+        };
+
+        let btn = egui::Button::new(
+            egui::RichText::new(format!("{}", page_num))
+                .size(font_size)
+                .color(fg),
+        )
+        .fill(bg)
+        .min_size(egui::vec2(size, size))
+        .rounding(egui::Rounding::same(radius::MD));
+
+        ui.add(btn).clicked()
+    }
+
+    /// Renders pagination info text
     pub fn show_info(
         ui: &mut egui::Ui,
         theme: &Theme,
@@ -123,23 +185,27 @@ impl Pagination {
         _total_pages: usize,
     ) {
         ui.horizontal(|ui| {
-            ui.label(egui::RichText::new(format!(
-                "{} {}", 
-                total_items,
-                item_type
-            ))
-                .size(13.0)
-                .color(theme.text_secondary));
-            
-            ui.label(egui::RichText::new("•").size(13.0).color(theme.text_secondary));
-            
-            ui.label(egui::RichText::new(format!(
-                "Showing {}-{}", 
-                if total_items > 0 { start_idx + 1 } else { 0 }, 
-                end_idx
-            ))
-                .size(13.0)
-                .color(theme.text_secondary));
+            ui.label(
+                egui::RichText::new(format!("{} {}", total_items, item_type))
+                    .size(typography::CAPTION)
+                    .color(theme.text_tertiary),
+            );
+
+            ui.label(
+                egui::RichText::new("•")
+                    .size(typography::CAPTION)
+                    .color(theme.text_muted),
+            );
+
+            ui.label(
+                egui::RichText::new(format!(
+                    "Showing {}-{}",
+                    if total_items > 0 { start_idx + 1 } else { 0 },
+                    end_idx
+                ))
+                .size(typography::CAPTION)
+                .color(theme.text_tertiary),
+            );
         });
     }
 }

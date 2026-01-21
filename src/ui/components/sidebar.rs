@@ -1,16 +1,19 @@
-//! Category sidebar component (Netflix-style).
+//! Category sidebar component - Modern, clean design
+//!
+//! A refined sidebar with clean category buttons and subtle interactions.
+//! Features smooth scrolling and clear visual hierarchy.
 
 use eframe::egui;
 use crate::models::Category;
-use crate::ui::theme::{Theme, dimensions};
+use crate::ui::theme::{Theme, spacing, typography, radius};
 use crate::ui::messages::ContentType;
 
-/// Category sidebar component for filtering content.
+/// Category sidebar component - Modern design
 pub struct CategorySidebar;
 
 impl CategorySidebar {
-    /// Renders the Netflix-style category sidebar.
-    /// Returns Some(category_id) if a category was selected, or Some("") for "All".
+    /// Renders the sidebar with category list.
+    /// Returns Some(category_id) if a category was selected, or Some(None) for "All".
     pub fn show(
         ui: &mut egui::Ui,
         theme: &Theme,
@@ -20,106 +23,198 @@ impl CategorySidebar {
         category_search: &mut String,
     ) -> Option<Option<String>> {
         let mut selection_changed: Option<Option<String>> = None;
-        
-        ui.add_space(8.0);
-        ui.label(egui::RichText::new("Genres")
-            .size(16.0)
-            .color(theme.text_primary)
-            .strong());
-        ui.add_space(12.0);
-        
-        // Search box with Netflix styling
+
+        // Sizing
+        let item_height = 44.0;
+        let font_size = typography::BODY_SM;
+
+        ui.add_space(spacing::SM);
+
+        // Header
+        ui.label(
+            egui::RichText::new("Categories")
+                .size(typography::CAPTION)
+                .color(theme.text_tertiary),
+        );
+
+        ui.add_space(spacing::MD);
+
+        // Search input
         egui::Frame::none()
             .fill(theme.inactive_bg())
-            .rounding(egui::Rounding::same(4.0))
-            .inner_margin(egui::Margin::symmetric(8.0, 6.0))
+            .rounding(egui::Rounding::same(radius::MD))
+            .inner_margin(egui::Margin::symmetric(spacing::MD, spacing::SM))
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new("🔍").size(12.0).color(theme.text_secondary));
-                    ui.add(egui::TextEdit::singleline(category_search)
-                        .hint_text("Search...")
-                        .desired_width(140.0)
-                        .frame(false));
+                    ui.label(
+                        egui::RichText::new("🔍")
+                            .size(14.0)
+                            .color(theme.text_muted),
+                    );
+                    ui.add_space(spacing::XS);
+
+                    let search_edit = egui::TextEdit::singleline(category_search)
+                        .hint_text(
+                            egui::RichText::new("Filter...")
+                                .size(font_size)
+                                .color(theme.text_muted),
+                        )
+                        .desired_width(ui.available_width() - 30.0)
+                        .font(egui::FontId::proportional(font_size))
+                        .frame(false);
+
+                    ui.add(search_edit);
                 });
             });
-        
-        ui.add_space(12.0);
-        
-        // Thin separator line
-        let separator_rect = ui.available_rect_before_wrap();
-        ui.painter().hline(
-            separator_rect.min.x..=separator_rect.min.x + 180.0,
-            separator_rect.min.y,
-            egui::Stroke::new(1.0, theme.border_color),
-        );
-        ui.add_space(8.0);
-        
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            // Only show "All" if search is empty
-            if category_search.is_empty() {
-                if Self::category_button(ui, theme, selected_category.is_none(), "All").clicked() {
-                    selection_changed = Some(None);
-                }
-                ui.add_space(2.0);
-            }
-            
-            // Filter categories by search
-            let search_lower = category_search.to_lowercase();
-            for category in categories {
-                // Skip if doesn't match search
-                if !category_search.is_empty() && 
-                   !category.category_name.to_lowercase().contains(&search_lower) {
-                    continue;
-                }
-                
-                let is_selected = selected_category.as_ref() == Some(&category.category_id);
-                if Self::category_button(ui, theme, is_selected, &category.category_name).clicked() {
-                    selection_changed = Some(Some(category.category_id.clone()));
-                }
-                ui.add_space(1.0);
-            }
-        });
-        
+
+        ui.add_space(spacing::MD);
+
+        // Category list with scroll
+        let scroll_height = ui.available_height() - spacing::LG;
+        egui::ScrollArea::vertical()
+            .max_height(scroll_height)
+            .auto_shrink([false; 2])
+            .show(ui, |ui| {
+                ui.vertical(|ui| {
+                    ui.spacing_mut().item_spacing = egui::vec2(0.0, spacing::XS);
+
+                    // "All" option (only if no search)
+                    if category_search.is_empty() {
+                        let is_all_selected = selected_category.is_none();
+                        let all_response = Self::category_button(
+                            ui,
+                            theme,
+                            "All Categories",
+                            is_all_selected,
+                            item_height,
+                            font_size,
+                        );
+                        if all_response.clicked() {
+                            selection_changed = Some(None);
+                        }
+
+                        // Divider
+                        ui.add_space(spacing::SM);
+                        ui.add(egui::Separator::default().spacing(0.0));
+                        ui.add_space(spacing::SM);
+                    }
+
+                    // Filter categories
+                    let search_lower = category_search.to_lowercase();
+                    let filtered_categories: Vec<_> = categories
+                        .iter()
+                        .filter(|c| {
+                            search_lower.is_empty()
+                                || c.category_name.to_lowercase().contains(&search_lower)
+                        })
+                        .collect();
+
+                    // Category count
+                    ui.label(
+                        egui::RichText::new(format!("{} categories", filtered_categories.len()))
+                            .size(typography::LABEL)
+                            .color(theme.text_muted),
+                    );
+
+                    ui.add_space(spacing::SM);
+
+                    // Category buttons
+                    for category in filtered_categories {
+                        let is_selected = selected_category
+                            .as_ref()
+                            .map(|id| id == &category.category_id)
+                            .unwrap_or(false);
+
+                        let response = Self::category_button(
+                            ui,
+                            theme,
+                            &category.category_name,
+                            is_selected,
+                            item_height,
+                            font_size,
+                        );
+
+                        if response.clicked() {
+                            selection_changed = Some(Some(category.category_id.clone()));
+                        }
+                    }
+
+                    // Bottom padding
+                    ui.add_space(spacing::XL);
+                });
+            });
+
         selection_changed
     }
-    
-    /// Creates a Netflix-style category button.
-    fn category_button(ui: &mut egui::Ui, theme: &Theme, is_selected: bool, text: &str) -> egui::Response {
-        let (bg, fg) = if is_selected {
-            (theme.accent_blue, egui::Color32::WHITE)
+
+    /// Creates a category button with modern styling
+    fn category_button(
+        ui: &mut egui::Ui,
+        theme: &Theme,
+        text: &str,
+        is_selected: bool,
+        height: f32,
+        font_size: f32,
+    ) -> egui::Response {
+        let available_width = ui.available_width();
+        let display_text = truncate_text(text, 26);
+
+        let (rect, response) =
+            ui.allocate_exact_size(egui::vec2(available_width, height), egui::Sense::click());
+
+        let is_hovered = response.hovered();
+
+        // Background
+        let bg_color = if is_selected {
+            theme.accent_blue.linear_multiply(0.15)
+        } else if is_hovered {
+            theme.hover_overlay
         } else {
-            (egui::Color32::TRANSPARENT, theme.text_secondary)
+            egui::Color32::TRANSPARENT
         };
-        
-        // Truncate long category names
-        let display_text = if text.chars().count() > 22 {
-            format!("{}...", text.chars().take(19).collect::<String>())
-        } else {
-            text.to_string()
-        };
-        
-        let btn = egui::Button::new(
-            egui::RichText::new(&display_text)
-                .size(13.0)
-                .color(fg)
-        )
-        .fill(bg)
-        .min_size(egui::vec2(dimensions::CATEGORY_BUTTON_WIDTH, dimensions::CATEGORY_BUTTON_HEIGHT))
-        .rounding(egui::Rounding::same(4.0))
-        .frame(false);
-        
-        let response = ui.add(btn);
-        
-        // Underline on hover if not selected
-        if response.hovered() && !is_selected {
-            let rect = response.rect;
-            ui.painter().hline(
-                rect.min.x + 8.0..=rect.max.x - 8.0,
-                rect.max.y - 4.0,
-                egui::Stroke::new(2.0, theme.accent_blue),
-            );
+
+        ui.painter().rect_filled(rect, radius::MD, bg_color);
+
+        // Left accent bar for selected
+        if is_selected {
+            let accent_rect = egui::Rect::from_min_size(rect.min, egui::vec2(3.0, height));
+            ui.painter()
+                .rect_filled(accent_rect, radius::SM, theme.accent_blue);
         }
-        
+
+        // Text
+        let text_color = if is_selected {
+            theme.text_primary
+        } else if is_hovered {
+            theme.text_primary
+        } else {
+            theme.text_secondary
+        };
+
+        let galley = ui.painter().layout_no_wrap(
+            display_text,
+            egui::FontId::proportional(font_size),
+            text_color,
+        );
+
+        let text_pos = egui::pos2(
+            rect.min.x + spacing::LG,
+            rect.center().y - galley.size().y / 2.0,
+        );
+        ui.painter().galley(text_pos, galley, text_color);
+
         response
+    }
+}
+
+/// Truncates text to a maximum length with ellipsis.
+fn truncate_text(text: &str, max_len: usize) -> String {
+    if text.chars().count() > max_len {
+        format!(
+            "{}...",
+            text.chars().take(max_len.saturating_sub(3)).collect::<String>()
+        )
+    } else {
+        text.to_string()
     }
 }
