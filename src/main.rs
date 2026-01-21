@@ -103,6 +103,12 @@ fn main() -> Result<(), eframe::Error> {
     eframe::run_native(
         "IPTV Player",
         options,
-        Box::new(|cc| Ok(Box::new(IPTVPlayerApp::new(cc)))),
+        Box::new(move |cc| {
+            // Force 1:1 scaling in Steam Deck Game Mode to prevent Gamescope zoom
+            if is_steam_deck {
+                cc.egui_ctx.set_pixels_per_point(1.0);
+            }
+            Ok(Box::new(IPTVPlayerApp::new(cc)))
+        }),
     )
 }

@@ -105,6 +105,8 @@ pub struct IPTVPlayerApp {
     screen_width: f32,
     /// Cached screen height for Steam Deck detection
     screen_height: f32,
+    /// Whether running in Steam Deck Game Mode environment
+    is_steam_deck_mode: bool,
     
     // ─────────────────────────────────────────────────────────────────────
     // Pagination
@@ -160,6 +162,9 @@ impl IPTVPlayerApp {
     pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
         let config = Config::load().unwrap_or_default();
         let (tx, rx) = channel();
+
+        // Detect Steam Deck environment for scaling
+        let is_steam_deck_mode = Self::detect_steam_deck_environment();
         
         let mut app = Self {
             username: config.username.clone(),
@@ -191,6 +196,7 @@ impl IPTVPlayerApp {
             sidebar_visible: true,  // Visible by default on desktop
             screen_width: 1280.0,   // Default, will be updated each frame
             screen_height: 800.0,   // Default Steam Deck height, will be updated each frame
+            is_steam_deck_mode,
             page_size: dimensions::DEFAULT_PAGE_SIZE,
             current_page: 0,
             rx: Some(rx),
@@ -217,7 +223,37 @@ impl IPTVPlayerApp {
         
         app
     }
-    
+
+    /// Detects if running on Steam Deck based on environment variables.
+    fn detect_steam_deck_environment() -> bool {
+        // Check for Steam Deck specific environment variable
+        if std::env::var("SteamDeck").is_ok() || std::env::var("STEAM_DECK").is_ok() {
+            return true;
+        }
+
+        // Check for gamescope (Steam's compositor used in Game Mode)
+        if std::env::var("GAMESCOPE_WAYLAND_DISPLAY").is_ok() {
+            return true;
+        }
+
+        // Check for Steam runtime
+        if let Ok(runtime) = std::env::var("SteamAppId") {
+            if !runtime.is_empty() {
+                return true;
+            }
+        }
+
+        // Check /etc/os-release for SteamOS (Linux only)
+        #[cfg(target_os = "linux")]
+        if let Ok(content) = std::fs::read_to_string("/etc/os-release") {
+            if content.contains("SteamOS") || content.contains("steamos") {
+                return true;
+            }
+        }
+
+        false
+    }
+
     // ═══════════════════════════════════════════════════════════════════════
     // Connection Methods
     // ═══════════════════════════════════════════════════════════════════════
@@ -1619,6 +1655,13 @@ impl eframe::App for IPTVPlayerApp {
         // Create and apply theme
         let theme = Theme::new(self.dark_mode);
         theme.apply(ctx);
+
+        // Ensure Steam Deck scaling is maintained (Gamescope may try to reset it)
+        if self.is_steam_deck_mode {
+            if (ctx.pixels_per_point() - 1.0).abs() > 0.001 {
+                ctx.set_pixels_per_point(1.0);
+            }
+        }
 
         // Process background messages
         self.process_messages();
