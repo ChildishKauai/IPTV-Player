@@ -92,6 +92,11 @@ pub struct IPTVPlayerApp {
     show_player_settings: bool,
     /// Temporary player settings for the dialog (to allow cancel)
     temp_player_settings: Option<crate::models::PlayerSettings>,
+    /// Whether the EPG settings dialog is open
+    show_epg_settings: bool,
+    /// Temporary EPG settings for the dialog (to allow cancel)
+    temp_epg_enabled: bool,
+    temp_epg_url: String,
     /// Whether dark mode is enabled
     dark_mode: bool,
     /// Whether sidebar is visible (for mobile view)
@@ -179,6 +184,9 @@ impl IPTVPlayerApp {
             episode_dialog_state: None,
             show_player_settings: false,
             temp_player_settings: None,
+            show_epg_settings: false,
+            temp_epg_enabled: false,
+            temp_epg_url: String::new(),
             dark_mode: true,
             sidebar_visible: true,  // Visible by default on desktop
             screen_width: 1280.0,   // Default, will be updated each frame
@@ -225,7 +233,14 @@ impl IPTVPlayerApp {
             self.username.clone(),
             self.password.clone(),
         );
-        
+
+        // Set external EPG URL if enabled
+        if self.config.epg_enabled {
+            self.epg_cache.set_xmltv_url(self.config.epg_url.clone());
+        } else {
+            self.epg_cache.set_xmltv_url(None);
+        }
+
         let server_url = self.server_url.clone();
         let username = self.username.clone();
         let password = self.password.clone();
@@ -915,7 +930,7 @@ impl IPTVPlayerApp {
         
         // Request EPG data for visible channels
         for channel in &page_channels {
-            self.epg_cache.request_epg(&channel.stream_id);
+            self.epg_cache.request_epg_with_tvg(&channel.stream_id, channel.epg_channel_id.as_deref());
         }
         
         let favorites = self.config.favorites.clone();
@@ -1239,51 +1254,57 @@ impl IPTVPlayerApp {
                 let mut dates: Vec<String> = fixtures_by_date.keys().cloned().collect();
                 dates.sort();
                 
-                // Calculate how many cards fit per row based on window width
-                let card_width = 320.0;
-                let card_spacing = 12.0;
-                let available_width = ui.available_width();
-                let cards_per_row = ((available_width + card_spacing) / (card_width + card_spacing)).floor().max(1.0) as usize;
-                let cards_per_row = cards_per_row.min(4); // Max 4 per row
-                
                 // Display fixtures grouped by date in a scrollable area
-                egui::ScrollArea::vertical().show(ui, |ui| {
+                egui::ScrollArea::vertical()
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+
                     for date in dates.iter() {
                         if let Some(date_fixtures) = fixtures_by_date.get(date) {
-                            // Date header
-                            ui.add_space(8.0);
-                            ui.label(egui::RichText::new(date)
-                                .size(16.0)
-                                .color(theme.text_primary)
-                                .strong());
-                            ui.add_space(8.0);
-                            
-                            // Display fixtures for this date in responsive rows
-                            let fixtures_list: Vec<_> = date_fixtures.iter().take(30).collect();
-                            for chunk in fixtures_list.chunks(cards_per_row) {
-                                ui.horizontal(|ui| {
-                                    for fixture in chunk {
-                                        if let Some(action) = FootballCard::show(
-                                            ui,
-                                            theme,
-                                            fixture,
-                                            self.screen_width,
-                                        ) {
-                                            match action {
-                                                FootballAction::SearchChannel(channel) => {
-                                                    channel_to_search = Some(channel);
-                                                }
-                                                FootballAction::SearchTeam(team) => {
-                                                    channel_to_search = Some(team);
-                                                }
-                                            }
+                            // Date header with better styling
+                            ui.add_space(16.0);
+
+                            egui::Frame::none()
+                                .fill(egui::Color32::from_rgb(25, 25, 25))
+                                .inner_margin(egui::Margin::symmetric(12.0, 8.0))
+                                .rounding(egui::Rounding::same(4.0))
+                                .show(ui, |ui| {
+                                    ui.horizontal(|ui| {
+                                        ui.label(egui::RichText::new("📅")
+                                            .size(16.0)
+                                            .color(theme.accent_blue));
+                                        ui.add_space(6.0);
+                                        ui.label(egui::RichText::new(date)
+                                            .size(16.0)
+                                            .color(theme.text_primary)
+                                            .strong());
+                                    });
+                                });
+
+                            ui.add_space(12.0);
+
+                            // Display fixtures as a simple list
+                            for fixture in date_fixtures.iter().take(30) {
+                                if let Some(action) = FootballCard::show(
+                                    ui,
+                                    theme,
+                                    fixture,
+                                    self.screen_width,
+                                ) {
+                                    match action {
+                                        FootballAction::SearchChannel(channel) => {
+                                            channel_to_search = Some(channel);
+                                        }
+                                        FootballAction::SearchTeam(team) => {
+                                            channel_to_search = Some(team);
                                         }
                                     }
-                                });
-                                ui.add_space(8.0);
+                                }
                             }
                         }
                     }
+
+                    ui.add_space(32.0); // Bottom padding
                 });
                 
                 // Handle search action - switch to Live TV and search
@@ -1749,6 +1770,11 @@ impl eframe::App for IPTVPlayerApp {
                                         self.temp_player_settings = Some(self.config.player_settings.clone());
                                         self.show_player_settings = true;
                                     }
+                                    top_nav::NavAction::OpenEpgSettings => {
+                                        self.temp_epg_enabled = self.config.epg_enabled;
+                                        self.temp_epg_url = self.config.epg_url.clone().unwrap_or_default();
+                                        self.show_epg_settings = true;
+                                    }
                                     top_nav::NavAction::OpenScraperSettings => {
                                         self.show_scraper_settings = true;
                                     }
@@ -1799,7 +1825,40 @@ impl eframe::App for IPTVPlayerApp {
                     }
                 }
             }
-            
+
+            // EPG settings dialog
+            if self.show_epg_settings {
+                if let Some(action) = EpgSettingsDialog::show(
+                    ctx,
+                    &mut self.temp_epg_enabled,
+                    &mut self.temp_epg_url,
+                ) {
+                    match action {
+                        epg_settings::EpgSettingsAction::Saved => {
+                            self.config.epg_enabled = self.temp_epg_enabled;
+                            self.config.epg_url = if self.temp_epg_url.is_empty() {
+                                None
+                            } else {
+                                Some(self.temp_epg_url.clone())
+                            };
+                            let _ = self.config.save();
+
+                            // Update EPG cache with new settings
+                            if self.config.epg_enabled {
+                                self.epg_cache.set_xmltv_url(self.config.epg_url.clone());
+                            } else {
+                                self.epg_cache.set_xmltv_url(None);
+                            }
+
+                            self.show_epg_settings = false;
+                        }
+                        epg_settings::EpgSettingsAction::Cancelled => {
+                            self.show_epg_settings = false;
+                        }
+                    }
+                }
+            }
+
             // Scraper settings dialog
             if self.show_scraper_settings {
                 let mut should_close = false;

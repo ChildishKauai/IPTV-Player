@@ -17,6 +17,8 @@ dirs = "5.0"
 urlencoding = "2.1"
 rusqlite = { version = "0.31", features = ["bundled"] }
 chrono = "0.4"
+quick-xml = "0.31"
+flate2 = "1.0"
 
 [features]
 default = []

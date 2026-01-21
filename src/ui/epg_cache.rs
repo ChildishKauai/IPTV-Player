@@ -7,6 +7,7 @@ use std::thread;
 
 use crate::api::XtreamClient;
 use crate::models::EpgProgram;
+use crate::xmltv::XmltvParser;
 
 /// Message type for EPG loading
 struct EpgLoadResult {
@@ -30,6 +31,12 @@ pub struct EpgCache {
     password: String,
     /// Last cache refresh timestamp
     last_refresh: std::time::Instant,
+    /// External XMLTV EPG data: tvg_id -> programs
+    xmltv_cache: Arc<Mutex<HashMap<String, Vec<EpgProgram>>>>,
+    /// XMLTV EPG URL
+    xmltv_url: Arc<Mutex<Option<String>>>,
+    /// Whether XMLTV has been loaded
+    xmltv_loaded: Arc<Mutex<bool>>,
 }
 
 #[allow(dead_code)]
@@ -46,6 +53,9 @@ impl EpgCache {
             username: String::new(),
             password: String::new(),
             last_refresh: std::time::Instant::now(),
+            xmltv_cache: Arc::new(Mutex::new(HashMap::new())),
+            xmltv_url: Arc::new(Mutex::new(None)),
+            xmltv_loaded: Arc::new(Mutex::new(false)),
         }
     }
     
@@ -207,6 +217,109 @@ impl EpgCache {
             }
         }
         self.last_refresh = std::time::Instant::now();
+    }
+
+    /// Set external XMLTV EPG URL
+    pub fn set_xmltv_url(&self, url: Option<String>) {
+        if let Ok(mut xmltv_url) = self.xmltv_url.lock() {
+            *xmltv_url = url;
+        }
+        // Reset loaded flag when URL changes
+        if let Ok(mut loaded) = self.xmltv_loaded.lock() {
+            *loaded = false;
+        }
+        // Clear XMLTV cache
+        if let Ok(mut cache) = self.xmltv_cache.lock() {
+            cache.clear();
+        }
+    }
+
+    /// Load XMLTV EPG data from configured URL
+    pub fn load_xmltv(&self) {
+        // Check if already loaded or loading
+        if let Ok(loaded) = self.xmltv_loaded.lock() {
+            if *loaded {
+                return; // Already loaded, don't reload
+            }
+        }
+
+        let url = {
+            if let Ok(xmltv_url) = self.xmltv_url.lock() {
+                xmltv_url.clone()
+            } else {
+                None
+            }
+        };
+
+        if let Some(url) = url {
+            // Mark as loaded immediately to prevent duplicate loads
+            if let Ok(mut loaded) = self.xmltv_loaded.lock() {
+                *loaded = true;
+            }
+
+            let xmltv_cache = self.xmltv_cache.clone();
+            let xmltv_loaded = self.xmltv_loaded.clone();
+
+            thread::spawn(move || {
+                eprintln!("[EPG] Loading XMLTV from: {}", url);
+                match XmltvParser::parse_url(&url) {
+                    Ok(programs_map) => {
+                        eprintln!("[EPG] Successfully loaded XMLTV data for {} channels", programs_map.len());
+                        if let Ok(mut cache) = xmltv_cache.lock() {
+                            *cache = programs_map;
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("[EPG] Error loading XMLTV: {}", e);
+                        // Reset loaded flag on error so we can retry later
+                        if let Ok(mut loaded) = xmltv_loaded.lock() {
+                            *loaded = false;
+                        }
+                    }
+                }
+            });
+        }
+    }
+
+    /// Get EPG from XMLTV cache by tvg-id
+    pub fn get_xmltv_epg(&self, tvg_id: &str) -> Option<Vec<EpgProgram>> {
+        if let Ok(cache) = self.xmltv_cache.lock() {
+            cache.get(tvg_id).cloned()
+        } else {
+            None
+        }
+    }
+
+    /// Request EPG for a channel with tvg-id (tries XMLTV first, then Xtream API)
+    pub fn request_epg_with_tvg(&self, stream_id: &str, tvg_id: Option<&str>) {
+        // First, try to load XMLTV if we have a URL and haven't loaded yet
+        if let Ok(loaded) = self.xmltv_loaded.lock() {
+            if !*loaded {
+                drop(loaded);
+                if let Ok(url) = self.xmltv_url.lock() {
+                    if url.is_some() {
+                        drop(url);
+                        self.load_xmltv();
+                    }
+                }
+            }
+        }
+
+        // If we have a tvg-id, try to get EPG from XMLTV cache
+        if let Some(tvg_id) = tvg_id {
+            if !tvg_id.is_empty() {
+                if let Some(programs) = self.get_xmltv_epg(tvg_id) {
+                    // Store in main cache using stream_id
+                    if let Ok(mut cache) = self.cache.lock() {
+                        cache.insert(stream_id.to_string(), programs);
+                    }
+                    return;
+                }
+            }
+        }
+
+        // Fallback to Xtream API
+        self.request_epg(stream_id);
     }
 }
 

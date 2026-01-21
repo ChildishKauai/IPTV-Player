@@ -1,0 +1,25 @@
+{
+  "server_url": "http://your-iptv-server.com:8080",
+  "username": "your_username",
+  "password": "your_password",
+  "favorites": [],
+  "auto_login": false,
+  "player_settings": {
+    "player_type": "MPV",
+    "custom_player_path": "",
+    "custom_player_args": "",
+    "audio_track": 0,
+    "subtitle_track": 0,
+    "subtitles_enabled": true,
+    "preferred_audio_language": "eng",
+    "preferred_subtitle_language": "eng",
+    "audio_sync_offset": 0.0,
+    "subtitle_sync_offset": 0.0,
+    "volume": 100,
+    "hardware_acceleration": true,
+    "low_latency_mode": false,
+    "buffer_size_kb": 0
+  },
+  "epg_url": "https://epgshare01.online/epgshare01/epg_ripper_US2.xml.gz",
+  "epg_enabled": true
+}

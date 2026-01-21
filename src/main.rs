@@ -24,6 +24,7 @@ mod api;
 mod media_tools;
 mod models;
 mod m3u;
+mod xmltv;
 mod ui;
 
 use ui::IPTVPlayerApp;

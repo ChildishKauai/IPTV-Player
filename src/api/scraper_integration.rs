@@ -137,7 +137,7 @@ impl ScraperManager {
             return Err("Soccer Scraper not found".to_string());
         }
 
-        let python_cmd = if cfg!(windows) { "python" } else { "python3" };
+        let python_cmd = if cfg!(windows) { "python" } else { "py" };
 
         let mut cmd = Command::new(python_cmd);
         cmd.current_dir(&self.scraper_dir)

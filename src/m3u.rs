@@ -2,6 +2,12 @@
 use std::io::{BufRead, BufReader};
 use crate::models::Channel;
 
+/// Result from parsing M3U playlist
+pub struct M3UParseResult {
+    pub channels: Vec<Channel>,
+    pub epg_url: Option<String>,
+}
+
 #[allow(dead_code)]
 pub struct M3UParser;
 
@@ -167,6 +173,79 @@ impl M3UParser {
         categories.sort();
         categories.dedup();
         categories
+    }
+
+    /// Parse M3U content and extract EPG URL from header
+    pub fn parse_with_epg(content: &str) -> Result<M3UParseResult, String> {
+        let mut epg_url: Option<String> = None;
+        let mut channels = Vec::new();
+        let mut current_name = String::new();
+        let mut current_logo = String::new();
+        let mut current_group = String::new();
+        let mut current_tvg_id = String::new();
+        let mut channel_num = 1;
+
+        for line in content.lines() {
+            let line = line.trim();
+
+            // Check for EPG URL in header
+            if line.starts_with("#EXTM3U") {
+                // Look for x-tvg-url or url-tvg attribute
+                let url = Self::extract_attribute(&line, "x-tvg-url");
+                if !url.is_empty() {
+                    epg_url = Some(url);
+                } else {
+                    let url = Self::extract_attribute(&line, "url-tvg");
+                    if !url.is_empty() {
+                        epg_url = Some(url);
+                    }
+                }
+            } else if line.starts_with("#EXTINF:") {
+                current_name = Self::extract_name(&line);
+                current_logo = Self::extract_attribute(&line, "tvg-logo");
+                current_group = Self::extract_attribute(&line, "group-title");
+                current_tvg_id = Self::extract_attribute(&line, "tvg-id");
+            } else if !line.is_empty() && !line.starts_with("#") {
+                if !current_name.is_empty() {
+                    channels.push(Channel {
+                        num: channel_num.to_string(),
+                        name: current_name.clone(),
+                        stream_id: format!("m3u_{}", channels.len()),
+                        stream_type: "live".to_string(),
+                        stream_icon: current_logo.clone(),
+                        epg_channel_id: if current_tvg_id.is_empty() { None } else { Some(current_tvg_id.clone()) },
+                        added: None,
+                        category_id: if current_group.is_empty() { "Uncategorized".to_string() } else { current_group.clone() },
+                        category_name: if current_group.is_empty() { None } else { Some(current_group.clone()) },
+                        category_ids: None,
+                        custom_sid: None,
+                        tv_archive: None,
+                        direct_source: Some(line.to_string()),
+                        tv_archive_duration: None,
+                        is_adult: None,
+                    });
+                    channel_num += 1;
+                    current_name.clear();
+                    current_logo.clear();
+                    current_tvg_id.clear();
+                }
+            }
+        }
+
+        Ok(M3UParseResult {
+            channels,
+            epg_url,
+        })
+    }
+
+    /// Parse M3U from URL and extract EPG URL
+    pub fn parse_url_with_epg(url: &str) -> Result<M3UParseResult, String> {
+        let response = reqwest::blocking::get(url)
+            .map_err(|e| e.to_string())?
+            .text()
+            .map_err(|e| e.to_string())?;
+
+        Self::parse_with_epg(&response)
     }
 }
 

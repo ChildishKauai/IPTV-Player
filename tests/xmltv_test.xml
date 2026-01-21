@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE tv SYSTEM "xmltv.dtd">
+<tv generator-info-name="Test EPG">
+  <programme start="20260120100000 +0000" stop="20260120120000 +0000" channel="bbc1.uk">
+    <title lang="en">BBC News at Ten</title>
+    <desc lang="en">The latest national and international news stories, followed by weather.</desc>
+  </programme>
+  <programme start="20260120120000 +0000" stop="20260120130000 +0000" channel="bbc1.uk">
+    <title lang="en">Question Time</title>
+    <desc lang="en">Topical debate with politicians and public figures.</desc>
+  </programme>
+  <programme start="20260120130000 +0000" stop="20260120140000 +0000" channel="bbc1.uk">
+    <title lang="en">Match of the Day</title>
+    <desc lang="en">Highlights from the weekend's Premier League matches.</desc>
+  </programme>
+  <programme start="20260120100000 +0000" stop="20260120110000 +0000" channel="cnn.us">
+    <title lang="en">CNN Tonight</title>
+    <desc lang="en">Live coverage of breaking news and current events.</desc>
+  </programme>
+  <programme start="20260120110000 +0000" stop="20260120120000 +0000" channel="cnn.us">
+    <title lang="en">Anderson Cooper 360</title>
+    <desc lang="en">In-depth analysis of major news stories.</desc>
+  </programme>
+</tv>

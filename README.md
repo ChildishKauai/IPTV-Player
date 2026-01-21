@@ -11,7 +11,11 @@ A high-performance IPTV player built with Rust and egui for fast, native UI expe
 - ✅ Search functionality
 - ✅ Favorites system
 - ✅ Video playback with mpv/vlc/ffmpeg
-- ✅ EPG (Electronic Program Guide) support
+- ✅ **EPG (Electronic Program Guide) support**
+  - Built-in Xtream API EPG
+  - External XMLTV EPG (iptv-org/epg compatible)
+  - Auto-detect EPG from M3U playlists
+  - Current/next program display with progress bars
 - ✅ Image caching
 - ✅ Credential persistence
 - ✅ Responsive design (mobile/desktop)
@@ -57,6 +61,7 @@ iptv-player-rust/
 ├── src/
 │   ├── main.rs              # Entry point
 │   ├── m3u.rs               # M3U playlist parser
+│   ├── xmltv.rs             # XMLTV EPG parser
 │   ├── media_tools.rs       # FFmpeg/VLC/MPV manager
 │   ├── api/                 # API clients
 │   │   ├── xtream.rs        # Xtream Codes API
@@ -94,6 +99,7 @@ iptv-player-rust/
 | Document | Description |
 |----------|-------------|
 | [ARCHITECTURE.txt](docs/ARCHITECTURE.txt) | Design rationale and architecture |
+| [EPG_GUIDE.md](docs/EPG_GUIDE.md) | EPG configuration and setup guide |
 | [STEAM_DECK_BUILD.md](docs/STEAM_DECK_BUILD.md) | Steam Deck build instructions |
 | [XTREAM_API_GUIDE.md](docs/XTREAM_API_GUIDE.md) | Xtream Codes API reference |
 | [DEVELOPMENT_GUIDE.md](docs/DEVELOPMENT_GUIDE.md) | Development guidelines |

@@ -680,6 +680,12 @@ pub struct Config {
     /// Player settings for audio/subtitle configuration
     #[serde(default)]
     pub player_settings: PlayerSettings,
+    /// External EPG URL (XMLTV format) for supplementing or overriding built-in EPG
+    #[serde(default)]
+    pub epg_url: Option<String>,
+    /// Whether to enable external EPG
+    #[serde(default)]
+    pub epg_enabled: bool,
 }
 
 impl Config {
@@ -719,6 +725,8 @@ impl Default for Config {
             favorites: HashSet::new(),
             auto_login: false,
             player_settings: PlayerSettings::default(),
+            epg_url: None,
+            epg_enabled: false,
         }
     }
 }
