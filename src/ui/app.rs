@@ -627,7 +627,142 @@ impl IPTVPlayerApp {
     fn is_touch_mode(&self) -> bool {
         dimensions::is_touch_mode(self.screen_width, self.screen_height)
     }
-    
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Steam Deck / Gamepad Input
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /// Handles gamepad and keyboard input for Steam Deck Game Mode.
+    /// This enables navigation via controller (D-pad maps to arrow keys,
+    /// A button maps to Enter, B button maps to Escape).
+    fn handle_gamepad_input(&mut self, ctx: &egui::Context, is_touch_mode: bool) {
+        // Configure egui for better gamepad/keyboard navigation
+        let mut style = (*ctx.style()).clone();
+
+        // Enable keyboard navigation (Tab to move between widgets)
+        // This is crucial for Steam Deck controller support as Steam maps
+        // D-pad to arrow keys and face buttons to keyboard keys
+        style.interaction.selectable_labels = true;
+
+        // Larger focus rectangles for better visibility on Steam Deck
+        if is_touch_mode {
+            style.visuals.widgets.hovered.expansion = 4.0;
+            style.visuals.widgets.active.expansion = 2.0;
+            style.visuals.selection.stroke.width = 2.0;
+        }
+
+        ctx.set_style(style);
+
+        // Handle keyboard shortcuts for navigation
+        ctx.input(|i| {
+            // Escape key - close dialogs or go back
+            if i.key_pressed(egui::Key::Escape) {
+                if self.episode_dialog_state.is_some() {
+                    self.episode_dialog_state = None;
+                } else if self.show_player_settings {
+                    self.show_player_settings = false;
+                    self.temp_player_settings = None;
+                } else if self.show_epg_settings {
+                    self.show_epg_settings = false;
+                } else if self.show_scraper_settings {
+                    self.show_scraper_settings = false;
+                } else if self.sidebar_visible && is_touch_mode {
+                    self.sidebar_visible = false;
+                }
+            }
+
+            // Tab navigation between content types (LB/RB on controller)
+            // Steam typically maps LB/RB to Q/E or Page Up/Down
+            if i.key_pressed(egui::Key::PageDown) || (i.modifiers.ctrl && i.key_pressed(egui::Key::Tab)) {
+                self.cycle_content_type(true);
+            }
+            if i.key_pressed(egui::Key::PageUp) || (i.modifiers.ctrl && i.modifiers.shift && i.key_pressed(egui::Key::Tab)) {
+                self.cycle_content_type(false);
+            }
+
+            // Quick menu toggle (Start button often maps to Enter or F10)
+            if i.key_pressed(egui::Key::F10) {
+                self.sidebar_visible = !self.sidebar_visible;
+            }
+
+            // Home key to scroll to top / reset view
+            if i.key_pressed(egui::Key::Home) {
+                self.current_page = 0;
+            }
+
+            // Page navigation with arrow keys when not in text input (no widget has focus)
+            if !i.focused {
+                if i.key_pressed(egui::Key::ArrowLeft) && i.modifiers.alt {
+                    if self.current_page > 0 {
+                        self.current_page -= 1;
+                    }
+                }
+                if i.key_pressed(egui::Key::ArrowRight) && i.modifiers.alt {
+                    let total_pages = self.calculate_total_pages();
+                    if self.current_page < total_pages.saturating_sub(1) {
+                        self.current_page += 1;
+                    }
+                }
+            }
+        });
+    }
+
+    /// Cycles through content types (for bumper button navigation)
+    fn cycle_content_type(&mut self, forward: bool) {
+        let content_order = [
+            ContentType::LiveTV,
+            ContentType::ContinueWatching,
+            ContentType::Series,
+            ContentType::Movies,
+            ContentType::Favorites,
+            ContentType::Discover,
+            ContentType::FootballFixtures,
+        ];
+
+        let current_idx = content_order.iter()
+            .position(|&c| c == self.current_content)
+            .unwrap_or(0);
+
+        let new_idx = if forward {
+            (current_idx + 1) % content_order.len()
+        } else {
+            if current_idx == 0 { content_order.len() - 1 } else { current_idx - 1 }
+        };
+
+        let new_content = content_order[new_idx];
+
+        // Load data if needed
+        match new_content {
+            ContentType::Series if self.all_series.is_empty() => {
+                self.load_series();
+            }
+            ContentType::Movies if self.all_movies.is_empty() => {
+                self.load_movies();
+            }
+            _ => {}
+        }
+
+        self.current_content = new_content;
+        self.selected_category = None;
+        self.filter_content();
+    }
+
+    /// Calculates total pages for current content
+    fn calculate_total_pages(&self) -> usize {
+        let items_count = match self.current_content {
+            ContentType::LiveTV | ContentType::Favorites => self.filtered_channels.len(),
+            ContentType::Series => self.filtered_series.len(),
+            ContentType::Movies => self.filtered_movies.len(),
+            _ => 0,
+        };
+
+        if items_count == 0 || self.page_size == 0 {
+            1
+        } else {
+            (items_count + self.page_size - 1) / self.page_size
+        }
+    }
+
     // ═══════════════════════════════════════════════════════════════════════
     // Message Processing
     // ═══════════════════════════════════════════════════════════════════════
@@ -1480,19 +1615,23 @@ impl eframe::App for IPTVPlayerApp {
         if !self.image_cache.is_loading() {
             ctx.request_repaint_after(std::time::Duration::from_millis(500));
         }
-        
+
         // Create and apply theme
         let theme = Theme::new(self.dark_mode);
         theme.apply(ctx);
-        
+
         // Process background messages
         self.process_messages();
-        
+
         // Update screen dimensions for responsive layout
         self.screen_width = ctx.screen_rect().width();
         self.screen_height = ctx.screen_rect().height();
         let is_mobile = dimensions::is_mobile(self.screen_width);
         let is_touch_mode = dimensions::is_touch_mode(self.screen_width, self.screen_height);
+
+        // Steam Deck / Gamepad input handling
+        // Enable keyboard navigation for better controller support
+        self.handle_gamepad_input(ctx, is_touch_mode);
         
         if !self.connected {
             // Show login screen

@@ -402,10 +402,11 @@ pub mod dimensions {
     pub const MOVIE_CARD_HEIGHT: f32 = 270.0;
 
     /// Steam Deck optimized card dimensions
+    /// Designed to fit 5-6 cards per row on 1280px width minus sidebar
     pub const STEAM_DECK_CARD_WIDTH: f32 = 160.0;
     pub const STEAM_DECK_CARD_HEIGHT: f32 = 100.0;
-    pub const STEAM_DECK_SERIES_CARD_WIDTH: f32 = 140.0;
-    pub const STEAM_DECK_SERIES_CARD_HEIGHT: f32 = 210.0;
+    pub const STEAM_DECK_SERIES_CARD_WIDTH: f32 = 150.0;
+    pub const STEAM_DECK_SERIES_CARD_HEIGHT: f32 = 225.0;
 
     /// Image dimensions
     pub const CHANNEL_ICON_SIZE: f32 = 64.0;
@@ -414,25 +415,39 @@ pub mod dimensions {
 
     /// Sidebar dimensions
     pub const SIDEBAR_WIDTH: f32 = 240.0;
-    pub const STEAM_DECK_SIDEBAR_WIDTH: f32 = 200.0;
+    pub const STEAM_DECK_SIDEBAR_WIDTH: f32 = 180.0; // Narrower for more content space
     pub const CATEGORY_BUTTON_WIDTH: f32 = 210.0;
     pub const CATEGORY_BUTTON_HEIGHT: f32 = 44.0;
-    pub const STEAM_DECK_CATEGORY_BUTTON_HEIGHT: f32 = 48.0;
+    pub const STEAM_DECK_CATEGORY_BUTTON_HEIGHT: f32 = 52.0; // Larger for gamepad
 
-    /// Button dimensions
+    /// Button dimensions - Steam Deck uses larger touch targets
     pub const BUTTON_HEIGHT: f32 = 44.0;
     pub const SMALL_BUTTON_SIZE: f32 = 40.0;
-    pub const STEAM_DECK_BUTTON_HEIGHT: f32 = 52.0;
-    pub const STEAM_DECK_TOUCH_TARGET: f32 = 52.0;
+    pub const STEAM_DECK_BUTTON_HEIGHT: f32 = 56.0; // Larger for gamepad
+    pub const STEAM_DECK_TOUCH_TARGET: f32 = 56.0;  // Minimum interactive element size
 
-    /// Pagination
+    /// Navigation tab dimensions for Steam Deck
+    pub const STEAM_DECK_NAV_TAB_HEIGHT: f32 = 48.0;
+    pub const STEAM_DECK_NAV_TAB_PADDING: f32 = 16.0;
+
+    /// Pagination - fewer items per page for better visibility
     pub const DEFAULT_PAGE_SIZE: usize = 30;
-    pub const STEAM_DECK_PAGE_SIZE: usize = 24;
+    pub const STEAM_DECK_PAGE_SIZE: usize = 20; // Fewer items for larger cards
 
     /// Check if likely running on Steam Deck
+    /// Detects both landscape (1280x800) and portrait orientations
     pub fn is_steam_deck(screen_width: f32, screen_height: f32) -> bool {
-        (screen_width >= 1200.0 && screen_width <= 1300.0 && screen_height >= 750.0 && screen_height <= 850.0)
-            || (screen_height >= 1200.0 && screen_height <= 1300.0 && screen_width >= 750.0 && screen_width <= 850.0)
+        // Standard Steam Deck resolution with tolerance
+        let is_deck_landscape = screen_width >= 1200.0 && screen_width <= 1300.0
+            && screen_height >= 750.0 && screen_height <= 850.0;
+        // Rotated/portrait mode
+        let is_deck_portrait = screen_height >= 1200.0 && screen_height <= 1300.0
+            && screen_width >= 750.0 && screen_width <= 850.0;
+        // Also detect when running in Game Mode fullscreen
+        let is_exact_deck = (screen_width - 1280.0).abs() < 1.0
+            && (screen_height - 800.0).abs() < 1.0;
+
+        is_deck_landscape || is_deck_portrait || is_exact_deck
     }
 
     /// Check if in touch-friendly mode
@@ -461,10 +476,14 @@ pub mod dimensions {
         }
     }
 
-    /// Get card width for touch mode
+    /// Get card width for touch mode (Steam Deck, tablets)
     pub fn card_width_touch(screen_width: f32, screen_height: f32) -> f32 {
         if is_steam_deck(screen_width, screen_height) {
-            STEAM_DECK_SERIES_CARD_WIDTH
+            // On Steam Deck, calculate to fit ~5-6 cards per row
+            // Account for sidebar (180px) and padding
+            let available_width = screen_width - STEAM_DECK_SIDEBAR_WIDTH - 40.0;
+            let cards_per_row = 5.0;
+            (available_width / cards_per_row).min(STEAM_DECK_SERIES_CARD_WIDTH)
         } else if is_mobile(screen_width) {
             ((screen_width - 48.0) / 2.0).max(160.0)
         } else if is_tablet(screen_width) {

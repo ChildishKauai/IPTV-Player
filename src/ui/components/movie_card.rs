@@ -74,13 +74,14 @@ impl MovieCard {
         }
 
         let is_hovered = response.hovered();
+        let has_focus = response.has_focus();
         let poster_rect = egui::Rect::from_min_size(
             rect.min + egui::vec2(spacing::XS, 0.0),
             egui::vec2(card_width, poster_height),
         );
 
-        // Shadow on hover - subtle lift effect
-        if is_hovered {
+        // Shadow on hover or focus (for gamepad navigation) - subtle lift effect
+        if is_hovered || has_focus {
             let shadow_rect = poster_rect.expand(3.0);
             ui.painter().rect_filled(
                 shadow_rect.translate(egui::vec2(0.0, 4.0)),
@@ -95,11 +96,13 @@ impl MovieCard {
                 let uv = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
                 ui.painter().image(texture.id(), poster_rect, uv, egui::Color32::WHITE);
 
-                // Subtle border
+                // Border - accent color on focus for gamepad navigation
+                let border_color = if has_focus { theme.accent_blue } else { theme.border_color };
+                let border_width = if has_focus { 2.0 } else { 1.0 };
                 ui.painter().rect_stroke(
                     poster_rect,
                     radius::LG,
-                    egui::Stroke::new(1.0, theme.border_color),
+                    egui::Stroke::new(border_width, border_color),
                 );
             } else {
                 Self::paint_placeholder(ui, theme, poster_rect);
@@ -108,8 +111,8 @@ impl MovieCard {
             Self::paint_placeholder(ui, theme, poster_rect);
         }
 
-        // Hover overlay with play button
-        if is_hovered {
+        // Hover/focus overlay with play button (for gamepad navigation)
+        if is_hovered || has_focus {
             // Gradient overlay at bottom
             let gradient_height = 100.0;
             let gradient_rect = egui::Rect::from_min_max(

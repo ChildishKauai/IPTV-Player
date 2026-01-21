@@ -77,13 +77,14 @@ impl ChannelCard {
         }
 
         let is_hovered = response.hovered();
+        let has_focus = response.has_focus();
         let card_rect = egui::Rect::from_min_size(
             rect.min + egui::vec2(spacing::XS, spacing::XS),
             egui::vec2(card_width, card_height),
         );
 
-        // Card background with subtle shadow on hover
-        if is_hovered {
+        // Card background with subtle shadow on hover or focus (for gamepad navigation)
+        if is_hovered || has_focus {
             let shadow_rect = card_rect.expand(2.0);
             ui.painter().rect_filled(
                 shadow_rect.translate(egui::vec2(0.0, 2.0)),
@@ -93,18 +94,24 @@ impl ChannelCard {
         }
 
         // Card background
-        let card_bg = if is_hovered {
+        let card_bg = if is_hovered || has_focus {
             theme.card_elevated
         } else {
             theme.card_bg
         };
         ui.painter().rect_filled(card_rect, radius::LG, card_bg);
 
-        // Subtle border
+        // Border - accent color on focus for gamepad navigation visibility
+        let border_color = if has_focus {
+            theme.accent_blue
+        } else {
+            theme.border_color
+        };
+        let border_width = if has_focus { 2.0 } else { 1.0 };
         ui.painter().rect_stroke(
             card_rect,
             radius::LG,
-            egui::Stroke::new(1.0, theme.border_color),
+            egui::Stroke::new(border_width, border_color),
         );
 
         // Channel icon - circular with border
