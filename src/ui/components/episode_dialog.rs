@@ -220,8 +220,11 @@ impl EpisodeDialog {
             .resizable(true)
             .collapsible(false)
             .title_bar(false)
-            .default_width(850.0)
-            .default_height(600.0)
+            // Fit inside small windows (phones, split screen)
+            .default_width((850.0f32).min(ctx.screen_rect().width() - 72.0))
+            .max_width(ctx.screen_rect().width() - 72.0)
+            .max_height(ctx.screen_rect().height() - 72.0)
+            .default_height((600.0f32).min(ctx.screen_rect().height() - 72.0))
             .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
             .frame(
                 egui::Frame::none()
@@ -252,7 +255,7 @@ impl EpisodeDialog {
                                             if ui
                                                 .add(
                                                     egui::Button::new(
-                                                        egui::RichText::new("✕")
+                                                        egui::RichText::new("🗙")
                                                             .size(20.0)
                                                             .color(text_secondary),
                                                     )
@@ -281,7 +284,7 @@ impl EpisodeDialog {
                                             if ui
                                                 .add(
                                                     egui::Button::new(
-                                                        egui::RichText::new("✕")
+                                                        egui::RichText::new("🗙")
                                                             .size(20.0)
                                                             .color(text_secondary),
                                                     )
@@ -312,7 +315,7 @@ impl EpisodeDialog {
                                             if ui
                                                 .add(
                                                     egui::Button::new(
-                                                        egui::RichText::new("✕")
+                                                        egui::RichText::new("🗙")
                                                             .size(20.0)
                                                             .color(text_secondary),
                                                     )
@@ -425,17 +428,25 @@ impl EpisodeDialog {
 
                                                                     // Episode info
                                                                     ui.vertical(|ui| {
-                                                                        let title_display =
-                                                                            truncate_text(
-                                                                                &ep.title,
-                                                                                45,
-                                                                            );
-                                                                        ui.label(
-                                                                            egui::RichText::new(
-                                                                                &title_display,
+
+                                                                        // Leave room for the Play button; elide long titles
+
+                                                                        ui.set_max_width((ui.available_width() - 96.0).max(80.0));
+
+                                                                        ui.add(
+
+                                                                            egui::Label::new(
+
+                                                                                egui::RichText::new(&ep.title)
+
+                                                                                    .size(typography::BODY)
+
+                                                                                    .color(text_primary),
+
                                                                             )
-                                                                            .size(typography::BODY)
-                                                                            .color(text_primary),
+
+                                                                            .truncate(),
+
                                                                         );
                                                                         ui.label(
                                                                             egui::RichText::new(

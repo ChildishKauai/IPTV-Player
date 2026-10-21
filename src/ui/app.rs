@@ -15,7 +15,8 @@ use crate::api::DiscoverCategory;
 use crate::api::{FootballCache, FootballCategory};
 use crate::api::ScraperManager;
 use crate::models::*;
-use super::theme::{Theme, dimensions};
+use super::theme::{Theme, dimensions, spacing, typography};
+use super::layout::Layout;
 use super::messages::{AppMessage, ContentType};
 use super::image_cache::ImageCache;
 use super::components::*;
@@ -99,12 +100,12 @@ pub struct IPTVPlayerApp {
     temp_epg_url: String,
     /// Whether dark mode is enabled
     dark_mode: bool,
-    /// Whether sidebar is visible (for mobile view)
+    /// Whether the docked sidebar is shown (wide layouts)
     sidebar_visible: bool,
-    /// Cached screen width for responsive layout
-    screen_width: f32,
-    /// Cached screen height for Steam Deck detection
-    screen_height: f32,
+    /// Whether the slide-over category drawer is open (narrow layouts)
+    drawer_open: bool,
+    /// Responsive layout metrics, recomputed every frame
+    layout: Layout,
     /// Whether running in Steam Deck Game Mode environment
     is_steam_deck_mode: bool,
     
@@ -193,9 +194,9 @@ impl IPTVPlayerApp {
             temp_epg_enabled: false,
             temp_epg_url: String::new(),
             dark_mode: true,
-            sidebar_visible: true,  // Visible by default on desktop
-            screen_width: 1280.0,   // Default, will be updated each frame
-            screen_height: 800.0,   // Default Steam Deck height, will be updated each frame
+            sidebar_visible: true,
+            drawer_open: false,
+            layout: Layout::new(1280.0, is_steam_deck_mode),
             is_steam_deck_mode,
             page_size: dimensions::DEFAULT_PAGE_SIZE,
             current_page: 0,
@@ -659,9 +660,27 @@ impl IPTVPlayerApp {
         let _ = self.config.save();
     }
     
-    /// Returns whether we're in touch-friendly mode (Steam Deck or tablet).
-    fn is_touch_mode(&self) -> bool {
-        dimensions::is_touch_mode(self.screen_width, self.screen_height)
+    /// Changes the page size while keeping the first visible item on screen.
+    fn set_page_size(&mut self, page_size: usize) {
+        if page_size != self.page_size && page_size > 0 {
+            let first_item = self.current_page * self.page_size;
+            self.page_size = page_size;
+            self.current_page = first_item / page_size;
+        }
+    }
+
+    /// Toggles the category sidebar (docked) or drawer (overlay).
+    fn toggle_sidebar(&mut self) {
+        if self.layout.docked_sidebar() {
+            self.sidebar_visible = !self.sidebar_visible;
+        } else {
+            self.drawer_open = !self.drawer_open;
+        }
+    }
+
+    /// Whether the current view has anything to show in the sidebar.
+    fn has_sidebar(&self) -> bool {
+        !matches!(self.current_content, ContentType::ContinueWatching)
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -671,7 +690,8 @@ impl IPTVPlayerApp {
     /// Handles gamepad and keyboard input for Steam Deck Game Mode.
     /// This enables navigation via controller (D-pad maps to arrow keys,
     /// A button maps to Enter, B button maps to Escape).
-    fn handle_gamepad_input(&mut self, ctx: &egui::Context, is_touch_mode: bool) {
+    fn handle_gamepad_input(&mut self, ctx: &egui::Context) {
+        let is_touch_mode = self.layout.touch;
         // Configure egui for better gamepad/keyboard navigation
         let mut style = (*ctx.style()).clone();
 
@@ -702,8 +722,8 @@ impl IPTVPlayerApp {
                     self.show_epg_settings = false;
                 } else if self.show_scraper_settings {
                     self.show_scraper_settings = false;
-                } else if self.sidebar_visible && is_touch_mode {
-                    self.sidebar_visible = false;
+                } else if self.drawer_open {
+                    self.drawer_open = false;
                 }
             }
 
@@ -718,7 +738,7 @@ impl IPTVPlayerApp {
 
             // Quick menu toggle (Start button often maps to Enter or F10)
             if i.key_pressed(egui::Key::F10) {
-                self.sidebar_visible = !self.sidebar_visible;
+                self.toggle_sidebar();
             }
 
             // Home key to scroll to top / reset view
@@ -918,240 +938,273 @@ impl IPTVPlayerApp {
     
     /// Renders the main content area.
     fn render_content(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, theme: &Theme) {
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            ui.add_space(20.0);
-            
-            match self.current_content {
-                ContentType::LiveTV | ContentType::Favorites => {
-                    self.render_channels(ui, ctx, theme);
-                }
-                ContentType::ContinueWatching => {
-                    self.render_continue_watching(ui, ctx, theme);
-                }
-                ContentType::Series => {
-                    self.render_series(ui, ctx, theme);
-                }
-                ContentType::Movies => {
-                    self.render_movies(ui, ctx, theme);
-                }
-                ContentType::Discover => {
-                    self.render_discover(ui, ctx, theme);
-                }
-                ContentType::FootballFixtures => {
-                    self.render_football_section(ui, theme);
-                }
-            }
-        });
+        let padding = self.layout.content_padding();
+        egui::ScrollArea::vertical()
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                egui::Frame::none()
+                    .inner_margin(egui::Margin {
+                        left: padding,
+                        right: padding,
+                        top: spacing::XL,
+                        bottom: spacing::XXL,
+                    })
+                    .show(ui, |ui| {
+                        // Keep pages made of complete rows for the current width
+                        let width = ui.available_width();
+                        let columns = match self.current_content {
+                            ContentType::LiveTV | ContentType::Favorites => {
+                                self.layout.wide_grid(width).columns
+                            }
+                            ContentType::Series | ContentType::Movies => {
+                                self.layout.poster_grid(width).columns
+                            }
+                            _ => 1,
+                        };
+                        self.set_page_size(self.layout.page_size(columns));
+
+                        match self.current_content {
+                            ContentType::LiveTV | ContentType::Favorites => {
+                                self.render_channels(ui, ctx, theme);
+                            }
+                            ContentType::ContinueWatching => {
+                                self.render_continue_watching(ui, ctx, theme);
+                            }
+                            ContentType::Series => {
+                                self.render_series(ui, ctx, theme);
+                            }
+                            ContentType::Movies => {
+                                self.render_movies(ui, ctx, theme);
+                            }
+                            ContentType::Discover => {
+                                self.render_discover(ui, ctx, theme);
+                            }
+                            ContentType::FootballFixtures => {
+                                self.render_football_section(ui, theme);
+                            }
+                        }
+                    });
+            });
     }
-    
-    /// Renders the continue watching section.
-    fn render_continue_watching(&mut self, ui: &mut egui::Ui, _ctx: &egui::Context, theme: &Theme) {
-        ui.label(egui::RichText::new(self.current_content.title())
-            .size(24.0)
+
+    /// Renders a page heading.
+    fn render_heading(&self, ui: &mut egui::Ui, theme: &Theme, title: &str) {
+        ui.label(egui::RichText::new(title)
+            .size(self.layout.heading_size())
             .color(theme.text_primary)
             .strong());
-        
-        ui.add_space(4.0);
+        ui.add_space(spacing::XS);
+    }
+
+    /// Renders a centered loading spinner with a message.
+    fn render_loading(&self, ui: &mut egui::Ui, theme: &Theme, message: &str) {
+        ui.vertical_centered(|ui| {
+            ui.add_space(spacing::XXXL);
+            ui.spinner();
+            ui.add_space(spacing::SM);
+            ui.label(egui::RichText::new(message).color(theme.text_secondary));
+        });
+    }
+
+    /// Renders the continue watching section.
+    fn render_continue_watching(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, theme: &Theme) {
+        self.render_heading(ui, theme, self.current_content.title());
         let items = self.watch_history.get_continue_watching(50);
-        ui.label(egui::RichText::new(format!("{} items", items.len())).size(14.0).color(theme.text_secondary));
-        ui.add_space(16.0);
-        
+        ui.label(egui::RichText::new(format!("{} items", items.len()))
+            .size(typography::CAPTION)
+            .color(theme.text_tertiary));
+        ui.add_space(spacing::LG);
+
         if items.is_empty() {
             self.render_empty_state(ui, theme);
             return;
         }
-        
-        let card_width = dimensions::card_width(self.screen_width);
-        
+
+        let grid = self.layout.poster_grid(ui.available_width());
         let mut clicked_content: Option<crate::models::watch_history::WatchProgress> = None;
-        
-        ui.horizontal_wrapped(|ui| {
-            for progress in &items {
-                // Make the entire card clickable
-                let (rect, response) = ui.allocate_exact_size(
-                    egui::vec2(card_width, 280.0),
-                    egui::Sense::click(),
-                );
-                
-                if response.clicked() {
-                    clicked_content = Some(progress.clone());
-                }
-                
-                // Draw card with hover effect
-                let bg_color = if response.hovered() {
-                    theme.card_bg.linear_multiply(1.1)
-                } else {
-                    theme.card_bg
-                };
-                
-                ui.painter().rect_filled(
-                    rect,
-                    4.0,
-                    bg_color,
-                );
-                
-                // Draw border
-                ui.painter().rect_stroke(
-                    rect,
-                    4.0,
-                    egui::Stroke::new(1.0, theme.border_color),
-                );
-                
-                // Draw content inside the card
-                let mut child_ui = ui.new_child(egui::UiBuilder::new()
-                    .max_rect(rect.shrink(8.0))
-                    .layout(egui::Layout::top_down(egui::Align::LEFT)));
-                
-                // Thumbnail
-                if let Some(thumbnail_url) = &progress.thumbnail {
-                    if let Some(texture) = self.image_cache.get(thumbnail_url) {
-                        child_ui.add(egui::Image::new(&texture)
-                            .fit_to_exact_size(egui::vec2(card_width - 32.0, 150.0))
-                            .rounding(4.0));
-                    } else {
-                        child_ui.add_space(150.0);
-                    }
-                } else {
-                    // Placeholder
-                    let (placeholder_rect, _) = child_ui.allocate_exact_size(
-                        egui::vec2(card_width - 32.0, 150.0),
-                        egui::Sense::hover(),
-                    );
-                    child_ui.painter().rect_filled(placeholder_rect, 4.0, theme.panel_bg);
-                    child_ui.painter().text(
-                        placeholder_rect.center(),
-                        egui::Align2::CENTER_CENTER,
-                        &progress.content_type.to_uppercase(),
-                        egui::FontId::proportional(14.0),
-                        theme.text_secondary,
-                    );
-                }
-                
-                child_ui.add_space(8.0);
-                
-                // Progress bar
-                let progress_pct = progress.progress_percentage() / 100.0;
-                let (bar_rect, _) = child_ui.allocate_exact_size(
-                    egui::vec2(card_width - 32.0, 4.0),
-                    egui::Sense::hover(),
-                );
-                child_ui.painter().rect_filled(bar_rect, 2.0, theme.border_color);
-                let progress_rect = egui::Rect::from_min_size(
-                    bar_rect.min,
-                    egui::vec2((card_width - 32.0) * progress_pct, 4.0),
-                );
-                child_ui.painter().rect_filled(progress_rect, 2.0, theme.accent_blue);
-                
-                child_ui.add_space(8.0);
-                
-                // Title
-                child_ui.label(egui::RichText::new(&progress.content_name)
-                    .size(14.0)
-                    .color(theme.text_primary)
-                    .strong());
-                
-                // Episode info if series
-                if let (Some(season), Some(episode)) = (progress.season, progress.episode) {
-                    child_ui.label(egui::RichText::new(format!("S{}:E{}", season, episode))
-                        .size(12.0)
-                        .color(theme.text_secondary));
-                }
-                
-                // Progress info
-                let mins_watched = (progress.position_seconds / 60.0) as i32;
-                let mins_total = (progress.duration_seconds / 60.0) as i32;
-                child_ui.label(egui::RichText::new(format!("{} / {} min ({:.0}%)", 
-                    mins_watched, mins_total, progress.progress_percentage()))
-                    .size(12.0)
-                    .color(theme.text_secondary));
+
+        grid.show(ui, &items, |ui, progress| {
+            let card_width = grid.item_width;
+            let poster_height = dimensions::poster_height(card_width);
+            let (rect, response) = ui.allocate_exact_size(
+                egui::vec2(card_width, poster_height + 64.0),
+                egui::Sense::click(),
+            );
+            if response.clicked() {
+                clicked_content = Some(progress.clone());
             }
+            let highlighted = response.hovered() || response.has_focus();
+            let poster_rect = egui::Rect::from_min_size(rect.min, egui::vec2(card_width, poster_height));
+            let rounding = super::theme::radius::LG;
+
+            if highlighted {
+                ui.painter().rect_filled(
+                    poster_rect.expand(3.0).translate(egui::vec2(0.0, 4.0)),
+                    rounding,
+                    theme.elevated_shadow(),
+                );
+            }
+
+            // Poster or placeholder
+            let texture = progress.thumbnail.as_ref().and_then(|url| {
+                self.image_cache.load(ctx, url.clone());
+                self.image_cache.get(url)
+            });
+            if let Some(texture) = texture {
+                egui::Image::new(&texture)
+                    .rounding(rounding)
+                    .paint_at(ui, poster_rect);
+            } else {
+                ui.painter().rect_filled(poster_rect, rounding, theme.placeholder_bg());
+                ui.painter().text(
+                    poster_rect.center(),
+                    egui::Align2::CENTER_CENTER,
+                    progress.content_type.to_uppercase(),
+                    egui::FontId::proportional(typography::BODY_SM),
+                    theme.placeholder_icon(),
+                );
+            }
+            let border = if response.has_focus() { theme.accent_blue } else { theme.border_color };
+            ui.painter().rect_stroke(poster_rect, rounding, egui::Stroke::new(1.0, border));
+
+            // Resume button on hover
+            if highlighted {
+                let center = poster_rect.center();
+                let r = (card_width * 0.16).clamp(22.0, 36.0);
+                ui.painter().circle_filled(center, r, egui::Color32::from_black_alpha(180));
+                ui.painter().circle_stroke(center, r, egui::Stroke::new(2.0, egui::Color32::WHITE));
+                let t = r * 0.45;
+                ui.painter().add(egui::Shape::convex_polygon(
+                    vec![
+                        egui::pos2(center.x - t * 0.35, center.y - t * 0.6),
+                        egui::pos2(center.x - t * 0.35, center.y + t * 0.6),
+                        egui::pos2(center.x + t * 0.65, center.y),
+                    ],
+                    egui::Color32::WHITE,
+                    egui::Stroke::NONE,
+                ));
+            }
+
+            // Progress bar along the bottom edge of the poster
+            let bar = egui::Rect::from_min_max(
+                egui::pos2(poster_rect.min.x + spacing::SM, poster_rect.max.y - spacing::SM - 4.0),
+                egui::pos2(poster_rect.max.x - spacing::SM, poster_rect.max.y - spacing::SM),
+            );
+            let pct = (progress.progress_percentage() / 100.0).clamp(0.0, 1.0) as f32;
+            ui.painter().rect_filled(bar, 2.0, egui::Color32::from_white_alpha(60));
+            ui.painter().rect_filled(
+                egui::Rect::from_min_size(bar.min, egui::vec2(bar.width() * pct, bar.height())),
+                2.0,
+                theme.accent_blue,
+            );
+
+            // Title and details
+            let title = super::components::single_line(
+                ui,
+                &progress.content_name,
+                egui::FontId::proportional(typography::BODY_SM),
+                theme.text_primary,
+                card_width,
+            );
+            let title_y = poster_rect.max.y + spacing::SM;
+            ui.painter().galley(egui::pos2(rect.min.x, title_y), title, theme.text_primary);
+
+            let mins_left = ((progress.duration_seconds - progress.position_seconds) / 60.0).max(0.0) as i32;
+            let detail = match (progress.season, progress.episode) {
+                (Some(season), Some(episode)) => format!("S{}:E{} · {} min left", season, episode, mins_left),
+                _ => format!("{} min left", mins_left),
+            };
+            let detail = super::components::single_line(
+                ui,
+                &detail,
+                egui::FontId::proportional(typography::CAPTION),
+                theme.text_tertiary,
+                card_width,
+            );
+            ui.painter().galley(egui::pos2(rect.min.x, title_y + 20.0), detail, theme.text_tertiary);
         });
-        
+
         // Handle resume playback
         if let Some(progress) = clicked_content {
             self.resume_playback(&progress.content_id, &progress.content_type, progress.season, progress.episode);
         }
     }
-    
-    /// Renders the channels grid.
-    fn render_channels(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, theme: &Theme) {
-        ui.label(egui::RichText::new(self.current_content.title())
-            .size(24.0)
-            .color(theme.text_primary)
-            .strong());
-        
-        // Process pending EPG data
-        self.epg_cache.process_pending();
-        
-        // Pagination calculations
-        let total_items = self.filtered_channels.len();
-        let total_pages = (total_items + self.page_size - 1) / self.page_size;
+
+    /// Returns (start, end, total_pages) for the current page of `total_items`.
+    fn page_bounds(&mut self, total_items: usize) -> (usize, usize, usize) {
+        let total_pages = ((total_items + self.page_size - 1) / self.page_size).max(1);
+        // The page size can change on resize - never point past the last page
+        self.current_page = self.current_page.min(total_pages - 1);
         let start_idx = self.current_page * self.page_size;
         let end_idx = (start_idx + self.page_size).min(total_items);
-        
-        Pagination::show_info(ui, theme, start_idx, end_idx, total_items, "channels", self.current_page, total_pages);
-        ui.add_space(16.0);
-        
+        (start_idx, end_idx, total_pages)
+    }
+
+    /// Renders the channels grid.
+    fn render_channels(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, theme: &Theme) {
+        self.render_heading(ui, theme, self.current_content.title());
+
+        // Process pending EPG data
+        self.epg_cache.process_pending();
+
+        let (start_idx, end_idx, total_pages) = self.page_bounds(self.filtered_channels.len());
+        Pagination::show_info(ui, theme, start_idx, end_idx, self.filtered_channels.len(), "channels", self.current_page, total_pages);
+        ui.add_space(spacing::LG);
+
         // Get current page items
-        let page_channels: Vec<Channel> = self.filtered_channels.iter()
-            .skip(start_idx)
-            .take(self.page_size)
-            .cloned()
-            .collect();
-        
+        let page_channels: Vec<Channel> = self.filtered_channels[start_idx..end_idx].to_vec();
+
         // Request EPG data for visible channels
         for channel in &page_channels {
             self.epg_cache.request_epg_with_tvg(&channel.stream_id, channel.epg_channel_id.as_deref());
         }
-        
+
         let favorites = self.config.favorites.clone();
         let mut channel_to_play: Option<Channel> = None;
         let mut channel_to_toggle: Option<String> = None;
-        
-        let screen_width = self.screen_width;
-        ui.horizontal_wrapped(|ui| {
-            for channel in &page_channels {
-                // Build EPG info for this channel
-                let epg_info = {
-                    let current = self.epg_cache.get_current_program(&channel.stream_id);
-                    let next = self.epg_cache.get_next_program(&channel.stream_id);
-                    if current.is_some() || next.is_some() {
-                        Some(channel_card::ChannelEpgInfo {
-                            current_program: current,
-                            next_program: next,
-                        })
-                    } else {
-                        None
+
+        let grid = self.layout.wide_grid(ui.available_width());
+        grid.show(ui, &page_channels, |ui, channel| {
+            // Build EPG info for this channel
+            let epg_info = {
+                let current = self.epg_cache.get_current_program(&channel.stream_id);
+                let next = self.epg_cache.get_next_program(&channel.stream_id);
+                if current.is_some() || next.is_some() {
+                    Some(channel_card::ChannelEpgInfo {
+                        current_program: current,
+                        next_program: next,
+                    })
+                } else {
+                    None
+                }
+            };
+
+            if let Some(action) = ChannelCard::show(
+                ui,
+                ctx,
+                theme,
+                channel,
+                favorites.contains(&channel.stream_id),
+                &self.image_cache,
+                grid.item_width,
+                epg_info.as_ref(),
+            ) {
+                match action {
+                    channel_card::ChannelAction::Play(ch) => {
+                        channel_to_play = Some(ch);
                     }
-                };
-                
-                if let Some(action) = ChannelCard::show(
-                    ui,
-                    ctx,
-                    theme,
-                    channel,
-                    favorites.contains(&channel.stream_id),
-                    &self.image_cache,
-                    screen_width,
-                    epg_info.as_ref(),
-                ) {
-                    match action {
-                        channel_card::ChannelAction::Play(ch) => {
-                            channel_to_play = Some(ch);
-                        }
-                        channel_card::ChannelAction::ToggleFavorite(id) => {
-                            channel_to_toggle = Some(id);
-                        }
+                    channel_card::ChannelAction::ToggleFavorite(id) => {
+                        channel_to_toggle = Some(id);
                     }
                 }
             }
         });
-        
+
         // Handle pagination
-        if let Some(new_page) = Pagination::show(ui, theme, self.current_page, total_pages, self.is_touch_mode()) {
+        if let Some(new_page) = Pagination::show(ui, theme, self.current_page, total_pages, &self.layout) {
             self.current_page = new_page;
         }
-        
+
         // Process actions
         if let Some(channel) = channel_to_play {
             self.play_channel(&channel);
@@ -1162,135 +1215,95 @@ impl IPTVPlayerApp {
                 self.filter_content();
             }
         }
-        
+
         // Empty state
         if self.filtered_channels.is_empty() {
             self.render_empty_state(ui, theme);
         }
     }
-    
+
     /// Renders the series grid.
     fn render_series(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, theme: &Theme) {
-        ui.label(egui::RichText::new(self.current_content.title())
-            .size(24.0)
-            .color(theme.text_primary)
-            .strong());
-        
+        self.render_heading(ui, theme, self.current_content.title());
+
         if self.all_series.is_empty() {
-            ui.add_space(4.0);
-            ui.label(egui::RichText::new("0 series").size(14.0).color(theme.text_secondary));
-            ui.add_space(16.0);
-            ui.vertical_centered(|ui| {
-                ui.add_space(40.0);
-                ui.spinner();
-                ui.add_space(8.0);
-                ui.label("Loading series...");
-            });
+            self.render_loading(ui, theme, "Loading series…");
             return;
         }
-        
-        // Pagination
-        let total_items = self.filtered_series.len();
-        let total_pages = (total_items + self.page_size - 1) / self.page_size;
-        let start_idx = self.current_page * self.page_size;
-        let end_idx = (start_idx + self.page_size).min(total_items);
-        
-        Pagination::show_info(ui, theme, start_idx, end_idx, total_items, "series", self.current_page, total_pages);
-        ui.add_space(16.0);
-        
-        let page_series: Vec<Series> = self.filtered_series.iter()
-            .skip(start_idx)
-            .take(self.page_size)
-            .cloned()
-            .collect();
-        
-        let screen_width = self.screen_width;
-        ui.horizontal_wrapped(|ui| {
-            for series in &page_series {
-                if let Some(action) = SeriesCard::show(ui, ctx, theme, series, &self.image_cache, screen_width) {
-                    match action {
-                        series_card::SeriesAction::ViewEpisodes(id) => {
-                            // Create new episode dialog state - data loads in background
-                            self.episode_dialog_state = Some(episode_dialog::EpisodeDialogState::new(
-                                id,
-                                self.server_url.clone(),
-                                self.username.clone(),
-                                self.password.clone(),
-                            ));
-                        }
-                    }
-                }
+
+        let (start_idx, end_idx, total_pages) = self.page_bounds(self.filtered_series.len());
+        Pagination::show_info(ui, theme, start_idx, end_idx, self.filtered_series.len(), "series", self.current_page, total_pages);
+        ui.add_space(spacing::LG);
+
+        let page_series: Vec<Series> = self.filtered_series[start_idx..end_idx].to_vec();
+        let mut series_to_open: Option<i32> = None;
+
+        let grid = self.layout.poster_grid(ui.available_width());
+        grid.show(ui, &page_series, |ui, series| {
+            if let Some(series_card::SeriesAction::ViewEpisodes(id)) =
+                SeriesCard::show(ui, ctx, theme, series, &self.image_cache, grid.item_width)
+            {
+                series_to_open = Some(id);
             }
         });
-        
-        if let Some(new_page) = Pagination::show(ui, theme, self.current_page, total_pages, self.is_touch_mode()) {
+
+        if let Some(id) = series_to_open {
+            // Create new episode dialog state - data loads in background
+            self.episode_dialog_state = Some(episode_dialog::EpisodeDialogState::new(
+                id,
+                self.server_url.clone(),
+                self.username.clone(),
+                self.password.clone(),
+            ));
+        }
+
+        if let Some(new_page) = Pagination::show(ui, theme, self.current_page, total_pages, &self.layout) {
             self.current_page = new_page;
+        }
+
+        if self.filtered_series.is_empty() {
+            self.render_empty_state(ui, theme);
         }
     }
-    
+
     /// Renders the movies grid.
     fn render_movies(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, theme: &Theme) {
-        ui.label(egui::RichText::new(self.current_content.title())
-            .size(24.0)
-            .color(theme.text_primary)
-            .strong());
-        
+        self.render_heading(ui, theme, self.current_content.title());
+
         if self.all_movies.is_empty() {
-            ui.add_space(4.0);
-            ui.label(egui::RichText::new("0 movies").size(14.0).color(theme.text_secondary));
-            ui.add_space(16.0);
-            ui.vertical_centered(|ui| {
-                ui.add_space(40.0);
-                ui.spinner();
-                ui.add_space(8.0);
-                ui.label("Loading movies...");
-            });
+            self.render_loading(ui, theme, "Loading movies…");
             return;
         }
-        
-        // Pagination
-        let total_items = self.filtered_movies.len();
-        let total_pages = (total_items + self.page_size - 1) / self.page_size;
-        let start_idx = self.current_page * self.page_size;
-        let end_idx = (start_idx + self.page_size).min(total_items);
-        
-        Pagination::show_info(ui, theme, start_idx, end_idx, total_items, "movies", self.current_page, total_pages);
-        ui.add_space(16.0);
-        
-        let page_movies: Vec<serde_json::Value> = self.filtered_movies.iter()
-            .skip(start_idx)
-            .take(self.page_size)
-            .cloned()
-            .collect();
-        
+
+        let (start_idx, end_idx, total_pages) = self.page_bounds(self.filtered_movies.len());
+        Pagination::show_info(ui, theme, start_idx, end_idx, self.filtered_movies.len(), "movies", self.current_page, total_pages);
+        ui.add_space(spacing::LG);
+
+        let page_movies: Vec<serde_json::Value> = self.filtered_movies[start_idx..end_idx].to_vec();
         let mut movie_to_play: Option<(i64, String, String, Option<String>)> = None;
-        let screen_width = self.screen_width;
-        
-        ui.horizontal_wrapped(|ui| {
-            for movie in &page_movies {
-                if let Some(action) = MovieCard::show(ui, ctx, theme, movie, &self.image_cache, screen_width) {
-                    match action {
-                        movie_card::MovieAction::Play { stream_id, name, container_extension, thumbnail } => {
-                            movie_to_play = Some((stream_id, name, container_extension, thumbnail));
-                        }
-                    }
-                }
+
+        let grid = self.layout.poster_grid(ui.available_width());
+        grid.show(ui, &page_movies, |ui, movie| {
+            if let Some(movie_card::MovieAction::Play { stream_id, name, container_extension, thumbnail }) =
+                MovieCard::show(ui, ctx, theme, movie, &self.image_cache, grid.item_width)
+            {
+                movie_to_play = Some((stream_id, name, container_extension, thumbnail));
             }
         });
-        
-        if let Some(new_page) = Pagination::show(ui, theme, self.current_page, total_pages, self.is_touch_mode()) {
+
+        if let Some(new_page) = Pagination::show(ui, theme, self.current_page, total_pages, &self.layout) {
             self.current_page = new_page;
         }
-        
+
         if let Some((stream_id, name, ext, thumbnail)) = movie_to_play {
             self.play_movie(stream_id, &name, &ext, thumbnail);
         }
-        
+
         if self.filtered_movies.is_empty() {
             self.render_empty_state(ui, theme);
         }
     }
-    
+
     /// Renders the empty state message.
     fn render_empty_state(&self, ui: &mut egui::Ui, theme: &Theme) {
         ui.add_space(40.0);
@@ -1318,18 +1331,14 @@ impl IPTVPlayerApp {
         // Process pending data
         self.football_cache.process_pending();
         
-        ui.label(egui::RichText::new(self.current_content.title())
-            .size(24.0)
-            .color(theme.text_primary)
-            .strong());
-        ui.add_space(4.0);
+        self.render_heading(ui, theme, self.current_content.title());
         ui.label(egui::RichText::new("Find upcoming matches and which channels broadcast them")
-            .size(11.0)
-            .color(theme.text_secondary));
-        ui.add_space(8.0);
-        
+            .size(typography::CAPTION)
+            .color(theme.text_tertiary));
+        ui.add_space(spacing::MD);
+
         // Refresh button and status - always visible at the top
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             let button_text = if self.scraping_in_progress {
                 "⏳ Scraping..."
             } else {
@@ -1342,8 +1351,8 @@ impl IPTVPlayerApp {
                     .color(egui::Color32::WHITE)
             )
             .fill(if self.scraping_in_progress { theme.text_secondary } else { theme.accent_blue })
-            .rounding(egui::Rounding::same(4.0))
-            .min_size(egui::vec2(130.0, 32.0));
+            .rounding(egui::Rounding::same(super::theme::radius::MD))
+            .min_size(egui::vec2(130.0, self.layout.touch_target()));
             
             if ui.add_enabled(!self.scraping_in_progress, button).clicked() {
                 self.trigger_scraper();
@@ -1425,20 +1434,18 @@ impl IPTVPlayerApp {
                 let mut dates: Vec<String> = fixtures_by_date.keys().cloned().collect();
                 dates.sort();
                 
-                // Display fixtures grouped by date in a scrollable area
-                egui::ScrollArea::vertical()
-                    .auto_shrink([false, false])
-                    .show(ui, |ui| {
-
+                // Display fixtures grouped by date (the page itself scrolls)
+                {
                     for date in dates.iter() {
                         if let Some(date_fixtures) = fixtures_by_date.get(date) {
                             // Date header with better styling
                             ui.add_space(16.0);
 
                             egui::Frame::none()
-                                .fill(egui::Color32::from_rgb(25, 25, 25))
+                                .fill(theme.card_bg)
+                                .stroke(egui::Stroke::new(1.0, theme.border_color))
                                 .inner_margin(egui::Margin::symmetric(12.0, 8.0))
-                                .rounding(egui::Rounding::same(4.0))
+                                .rounding(egui::Rounding::same(super::theme::radius::MD))
                                 .show(ui, |ui| {
                                     ui.horizontal(|ui| {
                                         ui.label(egui::RichText::new("📅")
@@ -1460,7 +1467,7 @@ impl IPTVPlayerApp {
                                     ui,
                                     theme,
                                     fixture,
-                                    self.screen_width,
+                                    self.layout.width,
                                 ) {
                                     match action {
                                         FootballAction::SearchChannel(channel) => {
@@ -1475,8 +1482,7 @@ impl IPTVPlayerApp {
                         }
                     }
 
-                    ui.add_space(32.0); // Bottom padding
-                });
+                }
                 
                 // Handle search action - switch to Live TV and search
                 if let Some(query) = channel_to_search {
@@ -1487,13 +1493,7 @@ impl IPTVPlayerApp {
                 }
             }
         } else if is_loading {
-            ui.vertical_centered(|ui| {
-                ui.add_space(40.0);
-                ui.spinner();
-                ui.add_space(8.0);
-                ui.label(egui::RichText::new("Loading fixtures...")
-                    .color(theme.text_secondary));
-            });
+            self.render_loading(ui, theme, "Loading fixtures…");
         } else if let Some(error) = self.football_cache.last_error.clone() {
             let mut should_retry = false;
             ui.vertical_centered(|ui| {
@@ -1522,18 +1522,14 @@ impl IPTVPlayerApp {
     
     /// Renders the movies/series discover section
     fn render_movies_discover(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, theme: &Theme) {
-        ui.label(egui::RichText::new("🎬 Discover Trending & Popular")
-            .size(24.0)
-            .color(theme.text_primary)
-            .strong());
-        ui.add_space(4.0);
-        ui.label(egui::RichText::new("Powered by OMDb - Curated trending and popular titles")
-            .size(11.0)
-            .color(theme.text_secondary));
-        ui.add_space(8.0);
-        
-        // Category selector
-        ui.horizontal(|ui| {
+        self.render_heading(ui, theme, "🔥 Discover");
+        ui.label(egui::RichText::new("Curated trending and popular titles")
+            .size(typography::CAPTION)
+            .color(theme.text_tertiary));
+        ui.add_space(spacing::MD);
+
+        // Category selector (also available in the sidebar on wide screens)
+        ui.horizontal_wrapped(|ui| {
             ui.label(egui::RichText::new("Category:").color(theme.text_primary));
             egui::ComboBox::from_id_salt("discover_category")
                 .selected_text(self.discover_category.display_name())
@@ -1565,26 +1561,17 @@ impl IPTVPlayerApp {
             let display_items: Vec<_> = items.iter().take(20).collect();
             
             // Display items in a grid
-            ui.horizontal_wrapped(|ui| {
-                for item in display_items.iter() {
-                    // Only load images for items being displayed
-                    if let Some(poster_url) = &item.poster_url {
-                        self.image_cache.load(ctx, poster_url.clone());
-                    }
-                    
-                    if let Some(action) = DiscoverCard::show(
-                        ui,
-                        theme,
-                        item,
-                        &self.image_cache,
-                        self.screen_width,
-                    ) {
-                        match action {
-                            DiscoverAction::SearchInIptv(query) => {
-                                search_query = Some(query);
-                            }
-                        }
-                    }
+            let grid = self.layout.poster_grid(ui.available_width());
+            grid.show(ui, &display_items, |ui, item| {
+                // Only load images for items being displayed
+                if let Some(poster_url) = &item.poster_url {
+                    self.image_cache.load(ctx, poster_url.clone());
+                }
+
+                if let Some(DiscoverAction::SearchInIptv(query)) =
+                    DiscoverCard::show(ui, theme, item, &self.image_cache, grid.item_width)
+                {
+                    search_query = Some(query);
                 }
             });
             
@@ -1596,13 +1583,7 @@ impl IPTVPlayerApp {
                 self.filter_content();
             }
         } else if is_loading {
-            ui.vertical_centered(|ui| {
-                ui.add_space(40.0);
-                ui.spinner();
-                ui.add_space(8.0);
-                ui.label(egui::RichText::new("Loading content...")
-                    .color(theme.text_secondary));
-            });
+            self.render_loading(ui, theme, "Loading content…");
         } else if let Some(error) = self.discover_cache.last_error.clone() {
             // Show error message (clone to avoid borrow issues)
             let mut should_retry = false;
@@ -1645,6 +1626,186 @@ impl IPTVPlayerApp {
     }
 }
 
+impl IPTVPlayerApp {
+    /// Renders the sidebar contents: categories, or filters for Discover/Sports.
+    fn render_sidebar(&mut self, ui: &mut egui::Ui, theme: &Theme) {
+        let item_height = if self.layout.touch { 48.0 } else { 40.0 };
+        let mut selected = false;
+
+        match self.current_content {
+            ContentType::LiveTV | ContentType::Favorites | ContentType::Series | ContentType::Movies => {
+                let categories = match self.current_content {
+                    ContentType::Series => &self.series_categories,
+                    ContentType::Movies => &self.movie_categories,
+                    _ => &self.live_categories,
+                };
+                if let Some(selection) = CategorySidebar::show(
+                    ui,
+                    theme,
+                    item_height,
+                    categories,
+                    &self.selected_category,
+                    &mut self.category_search,
+                ) {
+                    self.selected_category = selection;
+                    self.filter_content();
+                    selected = true;
+                }
+            }
+            ContentType::FootballFixtures => {
+                ui.add_space(spacing::SM);
+                CategorySidebar::header(ui, theme, "Fixtures");
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    ui.spacing_mut().item_spacing.y = spacing::XS;
+                    for category in FootballCategory::all() {
+                        let is_selected = self.football_category == *category;
+                        if CategorySidebar::category_button(ui, theme, category.display_name(), is_selected, item_height, typography::BODY_SM).clicked() {
+                            self.football_category = *category;
+                            selected = true;
+                        }
+                    }
+                    ui.add_space(spacing::LG);
+
+                    // Refresh button - runs the scraper
+                    let btn_text = if self.scraping_in_progress { "⏳ Scraping…" } else { "🔄 Refresh fixtures" };
+                    let button = egui::Button::new(
+                        egui::RichText::new(btn_text)
+                            .size(typography::BODY_SM)
+                            .color(egui::Color32::WHITE)
+                    )
+                    .fill(if self.scraping_in_progress { theme.text_tertiary } else { theme.accent_blue })
+                    .rounding(egui::Rounding::same(super::theme::radius::MD))
+                    .min_size(egui::vec2(ui.available_width(), item_height));
+
+                    if ui.add_enabled(!self.scraping_in_progress, button).clicked() {
+                        self.trigger_scraper();
+                    }
+                });
+            }
+            ContentType::Discover => {
+                ui.add_space(spacing::SM);
+                CategorySidebar::header(ui, theme, "Discover");
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    ui.spacing_mut().item_spacing.y = spacing::XS;
+                    for category in DiscoverCategory::all() {
+                        let is_selected = self.discover_category == *category;
+                        if CategorySidebar::category_button(ui, theme, category.display_name(), is_selected, item_height, typography::BODY_SM).clicked() {
+                            self.discover_category = *category;
+                            selected = true;
+                        }
+                    }
+                });
+            }
+            ContentType::ContinueWatching => {}
+        }
+
+        // Selecting something in the drawer dismisses it
+        if selected {
+            self.drawer_open = false;
+        }
+    }
+
+    /// Renders the slide-over category drawer used on narrow layouts.
+    fn render_drawer(&mut self, ctx: &egui::Context, theme: &Theme) {
+        let screen = ctx.screen_rect();
+
+        // Dimmed scrim - tapping it closes the drawer
+        egui::Area::new(egui::Id::new("drawer_scrim"))
+            .order(egui::Order::Middle)
+            .fixed_pos(screen.min)
+            .show(ctx, |ui| {
+                let (rect, response) = ui.allocate_exact_size(screen.size(), egui::Sense::click());
+                ui.painter().rect_filled(rect, 0.0, egui::Color32::from_black_alpha(150));
+                if response.clicked() {
+                    self.drawer_open = false;
+                }
+            });
+
+        let drawer_rect = egui::Rect::from_min_size(
+            screen.min,
+            egui::vec2(self.layout.sidebar_width(), screen.height()),
+        );
+        egui::Area::new(egui::Id::new("drawer"))
+            .order(egui::Order::Foreground)
+            .fixed_pos(screen.min)
+            .show(ctx, |ui| {
+                ui.painter().rect_filled(drawer_rect, 0.0, theme.panel_bg);
+                ui.painter().vline(
+                    drawer_rect.max.x,
+                    drawer_rect.y_range(),
+                    egui::Stroke::new(1.0, theme.border_color),
+                );
+                let inner = drawer_rect.shrink(spacing::LG);
+                ui.allocate_new_ui(egui::UiBuilder::new().max_rect(inner), |ui| {
+                    ui.set_min_size(inner.size());
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new(self.current_content.title())
+                            .size(typography::H3)
+                            .color(theme.text_primary)
+                            .strong());
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            let size = self.layout.touch_target();
+                            let close = egui::Button::new(egui::RichText::new("🗙").size(18.0).color(theme.text_secondary))
+                                .fill(egui::Color32::TRANSPARENT)
+                                .stroke(egui::Stroke::NONE)
+                                .min_size(egui::vec2(size, size));
+                            if ui.add(close).on_hover_text("Close").clicked() {
+                                self.drawer_open = false;
+                            }
+                        });
+                    });
+                    ui.add_space(spacing::SM);
+                    self.render_sidebar(ui, theme);
+                });
+            });
+    }
+
+    /// Applies a navigation bar action.
+    fn handle_nav_action(&mut self, action: top_nav::NavAction) {
+        match action {
+            top_nav::NavAction::SwitchContent(content_type) => {
+                self.current_content = content_type;
+                self.selected_category = None;
+                self.drawer_open = false;
+                match content_type {
+                    ContentType::Series if self.all_series.is_empty() => {
+                        self.load_series();
+                    }
+                    ContentType::Movies if self.all_movies.is_empty() => {
+                        self.load_movies();
+                    }
+                    _ => {}
+                }
+                self.filter_content();
+            }
+            top_nav::NavAction::SearchChanged => {
+                self.filter_content();
+            }
+            top_nav::NavAction::ToggleTheme => {
+                self.dark_mode = !self.dark_mode;
+            }
+            top_nav::NavAction::Disconnect => {
+                self.disconnect();
+            }
+            top_nav::NavAction::OpenPlayerSettings => {
+                self.temp_player_settings = Some(self.config.player_settings.clone());
+                self.show_player_settings = true;
+            }
+            top_nav::NavAction::OpenEpgSettings => {
+                self.temp_epg_enabled = self.config.epg_enabled;
+                self.temp_epg_url = self.config.epg_url.clone().unwrap_or_default();
+                self.show_epg_settings = true;
+            }
+            top_nav::NavAction::OpenScraperSettings => {
+                self.show_scraper_settings = true;
+            }
+            top_nav::NavAction::ToggleSidebar => {
+                self.toggle_sidebar();
+            }
+        }
+    }
+}
+
 impl eframe::App for IPTVPlayerApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         // Manage repaint frequency based on loading state
@@ -1666,311 +1827,100 @@ impl eframe::App for IPTVPlayerApp {
         // Process background messages
         self.process_messages();
 
-        // Update screen dimensions for responsive layout
-        self.screen_width = ctx.screen_rect().width();
-        self.screen_height = ctx.screen_rect().height();
-        let is_mobile = dimensions::is_mobile(self.screen_width);
-        let is_touch_mode = dimensions::is_touch_mode(self.screen_width, self.screen_height);
+        // Update responsive layout for the current window size
+        let screen = ctx.screen_rect();
+        self.layout = Layout::new(screen.width(), self.is_steam_deck_mode);
+        if self.layout.docked_sidebar() {
+            self.drawer_open = false;
+        }
 
         // Steam Deck / Gamepad input handling
         // Enable keyboard navigation for better controller support
-        self.handle_gamepad_input(ctx, is_touch_mode);
-        
+        self.handle_gamepad_input(ctx);
+
         if !self.connected {
             // Show login screen
             egui::CentralPanel::default().show(ctx, |ui| {
-                if LoginScreen::show(
-                    ui,
-                    &theme,
-                    &mut self.server_url,
-                    &mut self.username,
-                    &mut self.password,
-                    self.connecting,
-                    &self.error_message,
-                    is_touch_mode,
-                ) {
-                    self.connect();
-                }
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    if LoginScreen::show(
+                        ui,
+                        &theme,
+                        &mut self.server_url,
+                        &mut self.username,
+                        &mut self.password,
+                        self.connecting,
+                        &self.error_message,
+                        self.layout.touch,
+                    ) {
+                        self.connect();
+                    }
+                });
             });
         } else {
             // Show main application
-            
-            // Sidebar - on mobile/touch show as overlay when sidebar_visible is true
-            // On desktop, always show
-            let show_sidebar = if is_mobile || is_touch_mode { self.sidebar_visible } else { true };
-            let sidebar_width = dimensions::sidebar_width_touch(self.screen_width, self.screen_height);
-            
-            if show_sidebar {
-                egui::SidePanel::left("categories")
-                    .min_width(sidebar_width)
-                    .max_width(sidebar_width)
+            let layout = self.layout;
+            let has_sidebar = self.has_sidebar();
+
+            // Phones: primary navigation lives in a bottom tab bar
+            if layout.is_compact() {
+                egui::TopBottomPanel::bottom("bottom_nav")
                     .frame(egui::Frame::none()
-                        .fill(if self.dark_mode { 
-                            egui::Color32::from_rgb(22, 22, 22) 
-                        } else { 
-                            egui::Color32::from_rgb(250, 250, 250) 
-                        })
-                        .inner_margin(egui::Margin::same(if is_mobile { 12.0 } else if is_touch_mode { 16.0 } else { 16.0 })))
+                        .fill(theme.panel_bg)
+                        .stroke(egui::Stroke::new(1.0, theme.border_color))
+                        .inner_margin(egui::Margin::symmetric(0.0, spacing::XS)))
                     .show(ctx, |ui| {
-                        // Close button on mobile/touch
-                        if is_mobile || is_touch_mode {
-                            ui.horizontal(|ui| {
-                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                    let close_btn = egui::Button::new(egui::RichText::new("✕").size(if is_touch_mode { 24.0 } else { 20.0 }))
-                                        .min_size(egui::vec2(if is_touch_mode { 48.0 } else { 36.0 }, if is_touch_mode { 48.0 } else { 36.0 }));
-                                    if ui.add(close_btn).clicked() {
-                                        self.sidebar_visible = false;
-                                    }
-                                });
-                            });
-                            ui.add_space(8.0);
-                        }
-                        
-                        // Get categories before mutable borrow (Discover has no categories)
-                        let categories: Vec<Category> = match self.current_content {
-                            ContentType::LiveTV | ContentType::Favorites => self.live_categories.clone(),
-                            ContentType::Series => self.series_categories.clone(),
-                            ContentType::Movies => self.movie_categories.clone(),
-                            ContentType::Discover => Vec::new(), // Discover doesn't use categories
-                            ContentType::FootballFixtures => Vec::new(), // Football fixtures don't use categories
-                            ContentType::ContinueWatching => Vec::new(), // Continue watching doesn't use categories
-                        };
-                        
-                        // Only show category sidebar if not in Discover, Football, or Continue Watching mode
-                        if !matches!(self.current_content, ContentType::Discover | ContentType::FootballFixtures | ContentType::ContinueWatching) {
-                            if let Some(selection) = CategorySidebar::show(
-                                ui,
-                                &theme,
-                                self.current_content,
-                                &categories,
-                                &self.selected_category,
-                                &mut self.category_search,
-                            ) {
-                                self.selected_category = selection;
-                                self.filter_content();
-                                // Auto-close sidebar on mobile after selection
-                                if is_mobile {
-                                    self.sidebar_visible = false;
-                                }
-                            }
-                        } else if matches!(self.current_content, ContentType::FootballFixtures) {
-                            // Show Football category selector in sidebar
-                            ui.label(egui::RichText::new("Filters")
-                                .size(16.0)
-                                .color(theme.text_primary)
-                                .strong());
-                            ui.add_space(12.0);
-                            
-                            // Thin separator
-                            let separator_rect = ui.available_rect_before_wrap();
-                            ui.painter().hline(
-                                separator_rect.min.x..=separator_rect.min.x + 180.0,
-                                separator_rect.min.y,
-                                egui::Stroke::new(1.0, theme.border_color),
-                            );
-                            ui.add_space(8.0);
-                            
-                            egui::ScrollArea::vertical().show(ui, |ui| {
-                                for category in FootballCategory::all() {
-                                    let is_selected = self.football_category == *category;
-                                    
-                                    // Netflix-style button with underline on hover
-                                    let text_color = if is_selected {
-                                        theme.accent_blue
-                                    } else {
-                                        theme.text_secondary
-                                    };
-                                    
-                                    // Touch-friendly button sizing
-                                    let btn_height = if is_touch_mode { 48.0 } else { 28.0 };
-                                    let font_size = if is_touch_mode { 15.0 } else { 13.0 };
-                                    
-                                    let response = ui.add(
-                                        egui::Button::new(
-                                            egui::RichText::new(category.display_name())
-                                                .size(font_size)
-                                                .color(text_color)
-                                        )
-                                        .fill(egui::Color32::TRANSPARENT)
-                                        .frame(false)
-                                        .min_size(egui::vec2(if is_touch_mode { 200.0 } else { 180.0 }, btn_height))
-                                    );
-                                    
-                                    // Draw underline on hover or selected
-                                    if response.hovered() || is_selected {
-                                        let rect = response.rect;
-                                        ui.painter().hline(
-                                            rect.min.x..=rect.min.x + 40.0,
-                                            rect.max.y,
-                                            egui::Stroke::new(2.0, if is_selected { theme.accent_blue } else { theme.text_secondary }),
-                                        );
-                                    }
-                                    
-                                    if response.clicked() {
-                                        self.football_category = *category;
-                                        if is_mobile || is_touch_mode {
-                                            self.sidebar_visible = false;
-                                        }
-                                    }
-                                    ui.add_space(2.0);
-                                }
-                            });
-                            
-                            ui.add_space(16.0);
-                            
-                            // Refresh button - runs the scraper
-                            let btn_text = if self.scraping_in_progress { "⏳ Scraping..." } else { "🔄 Refresh" };
-                            let button = egui::Button::new(
-                                egui::RichText::new(btn_text)
-                                    .size(12.0)
-                                    .color(egui::Color32::WHITE)
-                            )
-                            .fill(if self.scraping_in_progress { theme.text_secondary } else { theme.accent_blue })
-                            .rounding(egui::Rounding::same(4.0))
-                            .min_size(egui::vec2(100.0, 32.0));
-                            
-                            if ui.add_enabled(!self.scraping_in_progress, button).clicked() {
-                                self.trigger_scraper();
-                            }
-                        } else if matches!(self.current_content, ContentType::Discover) {
-                            // Show TMDB category selector in sidebar for Discover mode
-                            ui.label(egui::RichText::new("Categories")
-                                .size(16.0)
-                                .color(theme.text_primary)
-                                .strong());
-                            ui.add_space(12.0);
-                            
-                            // Thin separator
-                            let separator_rect = ui.available_rect_before_wrap();
-                            ui.painter().hline(
-                                separator_rect.min.x..=separator_rect.min.x + 180.0,
-                                separator_rect.min.y,
-                                egui::Stroke::new(1.0, theme.border_color),
-                            );
-                            ui.add_space(8.0);
-                            
-                            egui::ScrollArea::vertical().show(ui, |ui| {
-                                for category in DiscoverCategory::all() {
-                                    let is_selected = self.discover_category == *category;
-                                    
-                                    // Netflix-style button with underline on hover
-                                    let text_color = if is_selected {
-                                        theme.accent_blue
-                                    } else {
-                                        theme.text_secondary
-                                    };
-                                    
-                                    // Touch-friendly button sizing
-                                    let btn_height = if is_touch_mode { 48.0 } else { 28.0 };
-                                    let font_size = if is_touch_mode { 15.0 } else { 13.0 };
-                                    
-                                    let response = ui.add(
-                                        egui::Button::new(
-                                            egui::RichText::new(category.display_name())
-                                                .size(font_size)
-                                                .color(text_color)
-                                        )
-                                        .fill(egui::Color32::TRANSPARENT)
-                                        .frame(false)
-                                        .min_size(egui::vec2(if is_touch_mode { 200.0 } else { 180.0 }, btn_height))
-                                    );
-                                    
-                                    // Draw underline on hover or selected
-                                    if response.hovered() || is_selected {
-                                        let rect = response.rect;
-                                        ui.painter().hline(
-                                            rect.min.x..=rect.min.x + 40.0,
-                                            rect.max.y,
-                                            egui::Stroke::new(2.0, if is_selected { theme.accent_blue } else { theme.text_secondary }),
-                                        );
-                                    }
-                                    
-                                    if response.clicked() {
-                                        self.discover_category = *category;
-                                        if is_mobile || is_touch_mode {
-                                            self.sidebar_visible = false;
-                                        }
-                                    }
-                                    ui.add_space(2.0);
-                                }
-                            });
+                        if let Some(action) = TopNavigation::bottom_bar(ui, &theme, self.current_content) {
+                            self.handle_nav_action(action);
                         }
                     });
             }
-            
+
+            // Wide layouts dock the sidebar beside the content
+            if layout.docked_sidebar() && self.sidebar_visible && has_sidebar {
+                egui::SidePanel::left("categories")
+                    .resizable(false)
+                    .exact_width(layout.sidebar_width())
+                    .frame(egui::Frame::none()
+                        .fill(theme.panel_bg)
+                        .stroke(egui::Stroke::new(1.0, theme.border_color))
+                        .inner_margin(egui::Margin::same(spacing::LG)))
+                    .show(ctx, |ui| {
+                        self.render_sidebar(ui, &theme);
+                    });
+            }
+
             // Main content area
             egui::CentralPanel::default()
                 .frame(egui::Frame::none().fill(theme.bg_color))
                 .show(ctx, |ui| {
-                    // Top navigation - larger margins for touch mode
-                    let nav_margin = if is_mobile { 
-                        egui::Margin::symmetric(12.0, 10.0) 
-                    } else if is_touch_mode {
-                        egui::Margin::symmetric(20.0, 14.0) 
-                    } else { 
-                        egui::Margin::symmetric(20.0, 16.0) 
-                    };
-                    
+                    let padding = layout.content_padding();
                     egui::TopBottomPanel::top("top_panel")
                         .frame(egui::Frame::none()
                             .fill(theme.panel_bg)
-                            .inner_margin(nav_margin))
+                            .stroke(egui::Stroke::new(1.0, theme.border_color))
+                            .inner_margin(egui::Margin::symmetric(padding, if layout.touch { spacing::MD } else { spacing::LG })))
                         .show_inside(ui, |ui| {
                             if let Some(action) = TopNavigation::show(
                                 ui,
                                 &theme,
                                 self.current_content,
                                 &mut self.search_query,
-                                is_mobile,
-                                is_touch_mode,
+                                &layout,
+                                has_sidebar,
                             ) {
-                                match action {
-                                    top_nav::NavAction::SwitchContent(content_type) => {
-                                        self.current_content = content_type;
-                                        self.selected_category = None;
-                                        match content_type {
-                                            ContentType::Series if self.all_series.is_empty() => {
-                                                self.load_series();
-                                            }
-                                            ContentType::Movies if self.all_movies.is_empty() => {
-                                                self.load_movies();
-                                            }
-                                            _ => {}
-                                        }
-                                        self.filter_content();
-                                    }
-                                    top_nav::NavAction::SearchChanged => {
-                                        self.filter_content();
-                                    }
-                                    top_nav::NavAction::ToggleTheme => {
-                                        self.dark_mode = !self.dark_mode;
-                                    }
-                                    top_nav::NavAction::Disconnect => {
-                                        self.disconnect();
-                                    }
-                                    top_nav::NavAction::OpenPlayerSettings => {
-                                        self.temp_player_settings = Some(self.config.player_settings.clone());
-                                        self.show_player_settings = true;
-                                    }
-                                    top_nav::NavAction::OpenEpgSettings => {
-                                        self.temp_epg_enabled = self.config.epg_enabled;
-                                        self.temp_epg_url = self.config.epg_url.clone().unwrap_or_default();
-                                        self.show_epg_settings = true;
-                                    }
-                                    top_nav::NavAction::OpenScraperSettings => {
-                                        self.show_scraper_settings = true;
-                                    }
-                                    top_nav::NavAction::ToggleSidebar => {
-                                        self.sidebar_visible = !self.sidebar_visible;
-                                    }
-                                }
+                                self.handle_nav_action(action);
                             }
                         });
-                    
+
                     // Content area
                     self.render_content(ui, ctx, &theme);
                 });
-            
+
+            // Narrow layouts show the sidebar as a slide-over drawer
+            if self.drawer_open && has_sidebar {
+                self.render_drawer(ctx, &theme);
+            }
+
             // Episode dialog - use cached state for fast rendering
             if let Some(ref mut state) = self.episode_dialog_state {
                 if let Some(action) = EpisodeDialog::show(ctx, state, &self.config.player_settings) {
@@ -2048,14 +1998,17 @@ impl eframe::App for IPTVPlayerApp {
                 egui::Window::new("Football Fixtures Scraper")
                     .open(&mut self.show_scraper_settings)
                     .resizable(true)
-                    .default_width(400.0)
+                    .collapsible(false)
+                    .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+                    .default_width((400.0f32).min(self.layout.width - 48.0))
+                    .max_width(self.layout.width - 48.0)
                     .show(ctx, |ui| {
                         // Show current scraping status
                         ui.heading("📊 Football Fixtures Scraper");
                         ui.separator();
                         
                         if !self.scraper_manager.is_available() {
-                            ui.label(egui::RichText::new("⚠️ Soccer Scraper not found")
+                            ui.label(egui::RichText::new("⚠ Soccer Scraper not found")
                                 .color(theme.warning_color));
                             ui.label("Ensure Soccer-Scraper-main directory exists in the app folder");
                         } else if self.scraping_in_progress {
@@ -2071,7 +2024,7 @@ impl eframe::App for IPTVPlayerApp {
                             if ui.button("🔄 Scrape Fixtures Now").clicked() {
                                 should_trigger = true;
                             }
-                            ui.label("⏱️ Takes approximately 2 minutes");
+                            ui.label("⏱ Takes approximately 2 minutes");
                         }
                         
                         // Show last message

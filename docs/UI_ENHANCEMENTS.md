@@ -134,3 +134,26 @@ The app has been tested with:
 - ✅ Pagination working smoothly
 - ✅ Image loading in background
 - ✅ Window resizing
+
+## Responsive Layout (any screen size)
+
+The UI adapts to the window width using `src/ui/layout.rs`. Every frame the
+app builds a `Layout` from the window size, and components size themselves
+from it instead of hard-coded breakpoints.
+
+| Size class | Width | Navigation | Categories | Grid |
+|------------|-------|------------|------------|------|
+| Compact (phones) | < 600px | Bottom tab bar | Slide-over drawer (☰) | 1 channel / 2 posters per row |
+| Medium (tablets, split screen) | 600–1023px | Scrollable tab chips | Slide-over drawer (☰) | 2 channels / 3–5 posters |
+| Expanded (desktop, Steam Deck, TV) | ≥ 1024px | Inline tabs (chips if the header is too narrow) | Docked sidebar (☰ hides it) | As many columns as fit |
+
+- **Grids** (`Grid::fit`) pick the column count that keeps cards between a
+  minimum and maximum width and stretch them to fill the row exactly.
+- **Page size** is rounded to whole rows for the current column count, and
+  the first visible item stays on screen when the window is resized.
+- **Touch mode** (Steam Deck Game Mode, or any non-expanded width) uses
+  48px hit targets.
+- **Settings menu** (⚙) holds player settings, TV guide (EPG), sports
+  fixtures, light/dark mode and sign out on every screen size.
+- **Dialogs** cap their width to the window so they fit on phones.
+- The window can be resized down to 360×480.

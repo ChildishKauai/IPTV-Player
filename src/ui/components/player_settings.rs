@@ -78,10 +78,13 @@ impl PlayerSettingsDialog {
         let mut action = None;
         
         egui::Window::new("")
-            .resizable(true)
+            .resizable(false)
             .collapsible(false)
             .title_bar(false)
-            .default_width(520.0)
+            // Fixed content width that fits small windows (phones, split screen)
+            .min_width((472.0f32).min(ctx.screen_rect().width() - 80.0))
+            .max_width((472.0f32).min(ctx.screen_rect().width() - 80.0))
+            .max_height(ctx.screen_rect().height() - 72.0)
             .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
             .frame(egui::Frame::none()
                 .fill(egui::Color32::from_rgb(24, 24, 24))
@@ -96,7 +99,7 @@ impl PlayerSettingsDialog {
                         .strong());
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if ui.add(egui::Button::new(
-                            egui::RichText::new("✕").size(16.0).color(egui::Color32::WHITE)
+                            egui::RichText::new("🗙").size(16.0).color(egui::Color32::WHITE)
                         ).fill(egui::Color32::TRANSPARENT)).clicked() {
                             action = Some(PlayerSettingsAction::Cancelled);
                         }
@@ -105,7 +108,7 @@ impl PlayerSettingsDialog {
                 
                 ui.add_space(20.0);
                 
-                egui::ScrollArea::vertical().max_height(450.0).show(ui, |ui| {
+                egui::ScrollArea::vertical().auto_shrink([false, true]).max_height((ctx.screen_rect().height() - 160.0).clamp(200.0, 450.0)).show(ui, |ui| {
                     ui.spacing_mut().item_spacing.y = 12.0;
                     
                     // Player Selection Section
@@ -115,10 +118,10 @@ impl PlayerSettingsDialog {
                         .rounding(egui::Rounding::same(6.0))
                         .inner_margin(egui::Margin::same(16.0))
                         .show(ui, |ui| {
-                            ui.set_min_width(460.0);
+                            ui.set_min_width(ui.available_width());
                             
                             // Player type selection
-                            ui.horizontal(|ui| {
+                            ui.horizontal_wrapped(|ui| {
                                 ui.label(egui::RichText::new("Player:")
                                     .color(egui::Color32::from_rgb(180, 180, 180)));
                                 ui.add_space(10.0);
@@ -153,22 +156,22 @@ impl PlayerSettingsDialog {
                             // Custom player settings
                             if settings.player_type == PlayerType::Custom {
                                 ui.add_space(8.0);
-                                ui.horizontal(|ui| {
+                                ui.horizontal_wrapped(|ui| {
                                     ui.label(egui::RichText::new("Executable Path:")
                                         .color(egui::Color32::from_rgb(180, 180, 180)));
                                     ui.add_space(10.0);
                                     ui.add(egui::TextEdit::singleline(&mut settings.custom_player_path)
                                         .hint_text("e.g., C:\\Program Files\\Player\\player.exe")
-                                        .desired_width(260.0));
+                                        .desired_width(ui.available_width().min(260.0)));
                                 });
                                 
-                                ui.horizontal(|ui| {
+                                ui.horizontal_wrapped(|ui| {
                                     ui.label(egui::RichText::new("Arguments:")
                                         .color(egui::Color32::from_rgb(180, 180, 180)));
                                     ui.add_space(10.0);
                                     ui.add(egui::TextEdit::singleline(&mut settings.custom_player_args)
                                         .hint_text("{url} {title} {volume}")
-                                        .desired_width(260.0));
+                                        .desired_width(ui.available_width().min(260.0)));
                                 });
                                 
                                 ui.label(egui::RichText::new("Placeholders: {url}, {title}, {volume}, {audio_track}, {subtitle_track}")
@@ -186,10 +189,10 @@ impl PlayerSettingsDialog {
                         .rounding(egui::Rounding::same(6.0))
                         .inner_margin(egui::Margin::same(16.0))
                         .show(ui, |ui| {
-                            ui.set_min_width(460.0);
+                            ui.set_min_width(ui.available_width());
                             
                             // Audio track selection
-                            ui.horizontal(|ui| {
+                            ui.horizontal_wrapped(|ui| {
                                 ui.label(egui::RichText::new("Audio Track:")
                                     .color(egui::Color32::from_rgb(180, 180, 180)));
                                 ui.add_space(10.0);
@@ -212,7 +215,7 @@ impl PlayerSettingsDialog {
                         });
                         
                         // Preferred audio language
-                        ui.horizontal(|ui| {
+                        ui.horizontal_wrapped(|ui| {
                             ui.label(egui::RichText::new("Preferred Language:")
                                 .color(egui::Color32::from_rgb(180, 180, 180)));
                             ui.add_space(10.0);
@@ -237,7 +240,7 @@ impl PlayerSettingsDialog {
                         });
                         
                         // Volume slider
-                        ui.horizontal(|ui| {
+                        ui.horizontal_wrapped(|ui| {
                             ui.label(egui::RichText::new("Volume:")
                                 .color(egui::Color32::from_rgb(180, 180, 180)));
                             ui.add_space(10.0);
@@ -251,7 +254,7 @@ impl PlayerSettingsDialog {
                         });
                         
                         // Audio sync offset
-                        ui.horizontal(|ui| {
+                        ui.horizontal_wrapped(|ui| {
                             ui.label(egui::RichText::new("Audio Sync:")
                                 .color(egui::Color32::from_rgb(180, 180, 180)));
                             ui.add_space(10.0);
@@ -275,10 +278,10 @@ impl PlayerSettingsDialog {
                         .rounding(egui::Rounding::same(6.0))
                         .inner_margin(egui::Margin::same(16.0))
                         .show(ui, |ui| {
-                            ui.set_min_width(460.0);
+                            ui.set_min_width(ui.available_width());
                         
                         // Enable subtitles toggle
-                        ui.horizontal(|ui| {
+                        ui.horizontal_wrapped(|ui| {
                             ui.checkbox(&mut settings.subtitles_enabled, "");
                             ui.label(egui::RichText::new("Enable Subtitles")
                                 .color(if settings.subtitles_enabled { 
@@ -290,7 +293,7 @@ impl PlayerSettingsDialog {
                         
                         // Subtitle track selection (only if enabled)
                         ui.add_enabled_ui(settings.subtitles_enabled, |ui| {
-                            ui.horizontal(|ui| {
+                            ui.horizontal_wrapped(|ui| {
                                 ui.label(egui::RichText::new("Subtitle Track:")
                                     .color(egui::Color32::from_rgb(180, 180, 180)));
                                 ui.add_space(10.0);
@@ -310,7 +313,7 @@ impl PlayerSettingsDialog {
                             });
                             
                             // Preferred subtitle language
-                            ui.horizontal(|ui| {
+                            ui.horizontal_wrapped(|ui| {
                                 ui.label(egui::RichText::new("Preferred Language:")
                                     .color(egui::Color32::from_rgb(180, 180, 180)));
                                 ui.add_space(10.0);
@@ -335,7 +338,7 @@ impl PlayerSettingsDialog {
                             });
                             
                             // Subtitle sync offset
-                            ui.horizontal(|ui| {
+                            ui.horizontal_wrapped(|ui| {
                                 ui.label(egui::RichText::new("Subtitle Sync:")
                                     .color(egui::Color32::from_rgb(180, 180, 180)));
                                 ui.add_space(10.0);
@@ -360,10 +363,10 @@ impl PlayerSettingsDialog {
                         .rounding(egui::Rounding::same(6.0))
                         .inner_margin(egui::Margin::same(16.0))
                         .show(ui, |ui| {
-                            ui.set_min_width(460.0);
+                            ui.set_min_width(ui.available_width());
                         
                         // Hardware acceleration
-                        ui.horizontal(|ui| {
+                        ui.horizontal_wrapped(|ui| {
                             ui.checkbox(&mut settings.hardware_acceleration, "");
                             ui.label(egui::RichText::new("Hardware Acceleration")
                                 .color(egui::Color32::WHITE));
@@ -373,7 +376,7 @@ impl PlayerSettingsDialog {
                         });
                         
                         // Low latency mode
-                        ui.horizontal(|ui| {
+                        ui.horizontal_wrapped(|ui| {
                             ui.checkbox(&mut settings.low_latency_mode, "");
                             ui.label(egui::RichText::new("Low Latency Mode")
                                 .color(egui::Color32::WHITE));
@@ -383,7 +386,7 @@ impl PlayerSettingsDialog {
                         });
                         
                         // Buffer size
-                        ui.horizontal(|ui| {
+                        ui.horizontal_wrapped(|ui| {
                             ui.label(egui::RichText::new("Buffer Size:")
                                 .color(egui::Color32::from_rgb(180, 180, 180)));
                             ui.add_space(10.0);
@@ -404,7 +407,7 @@ impl PlayerSettingsDialog {
                     ui.add_space(16.0);
                     
                     // Action buttons
-                    ui.horizontal(|ui| {
+                    ui.horizontal_wrapped(|ui| {
                         // Save button - Netflix red
                         if ui.add(egui::Button::new(
                             egui::RichText::new("Save")

@@ -39,7 +39,10 @@ impl EpgSettingsDialog {
             .resizable(false)
             .collapsible(false)
             .title_bar(false)
-            .default_width(520.0)
+            // Fixed content width that fits small windows (phones, split screen)
+            .min_width((472.0f32).min(ctx.screen_rect().width() - 80.0))
+            .max_width((472.0f32).min(ctx.screen_rect().width() - 80.0))
+            .max_height(ctx.screen_rect().height() - 72.0)
             .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
             .frame(
                 egui::Frame::none()
@@ -62,7 +65,7 @@ impl EpgSettingsDialog {
                         if ui
                             .add(
                                 egui::Button::new(
-                                    egui::RichText::new("✕")
+                                    egui::RichText::new("🗙")
                                         .size(20.0)
                                         .color(text_secondary),
                                 )
@@ -84,7 +87,7 @@ impl EpgSettingsDialog {
                     .rounding(egui::Rounding::same(radius::LG))
                     .inner_margin(egui::Margin::same(spacing::LG))
                     .show(ui, |ui| {
-                        ui.set_min_width(460.0);
+                        ui.set_min_width(ui.available_width());
 
                         ui.horizontal(|ui| {
                             ui.vertical(|ui| {
@@ -114,7 +117,7 @@ impl EpgSettingsDialog {
                     .rounding(egui::Rounding::same(radius::LG))
                     .inner_margin(egui::Margin::same(spacing::LG))
                     .show(ui, |ui| {
-                        ui.set_min_width(460.0);
+                        ui.set_min_width(ui.available_width());
 
                         ui.label(
                             egui::RichText::new("XMLTV URL")
@@ -148,7 +151,7 @@ impl EpgSettingsDialog {
                     .rounding(egui::Rounding::same(radius::LG))
                     .inner_margin(egui::Margin::same(spacing::LG))
                     .show(ui, |ui| {
-                        ui.set_min_width(460.0);
+                        ui.set_min_width(ui.available_width());
 
                         ui.label(
                             egui::RichText::new("Quick Select")

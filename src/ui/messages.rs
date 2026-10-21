@@ -53,7 +53,7 @@ impl ContentType {
             ContentType::LiveTV => "📺 Live Channels",
             ContentType::Series => "📚 Series",
             ContentType::Movies => "🎬 Movies",
-            ContentType::ContinueWatching => "▶️ Continue Watching",
+            ContentType::ContinueWatching => "▶ Continue Watching",
             ContentType::Favorites => "⭐ Favorite Channels",
             ContentType::Discover => "🔥 Discover",
             ContentType::FootballFixtures => "⚽ Football Fixtures",

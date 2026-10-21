@@ -85,7 +85,9 @@ fn main() -> Result<(), eframe::Error> {
         // Desktop mode: windowed with standard sizing
         egui::ViewportBuilder::default()
             .with_inner_size([1400.0, 800.0])
-            .with_min_inner_size([1000.0, 600.0])
+            // Small minimum so the window can be snapped, split or sized
+            // like a phone - the layout adapts to any width
+            .with_min_inner_size([360.0, 480.0])
             .with_resizable(true)
     };
 
@@ -95,8 +97,10 @@ fn main() -> Result<(), eframe::Error> {
         hardware_acceleration: eframe::HardwareAcceleration::Preferred,
         // Vsync for smoother rendering on Steam Deck's 60Hz display
         vsync: true,
-        // Multisampling for better rendering quality
-        multisampling: 4,
+        // No MSAA: egui anti-aliases shapes itself, and requiring
+        // multisampling stops the app from starting on GPUs, VMs and
+        // remote desktops that don't offer it
+        multisampling: 0,
         ..Default::default()
     };
 

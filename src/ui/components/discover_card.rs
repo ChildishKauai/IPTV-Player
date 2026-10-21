@@ -20,17 +20,16 @@ impl DiscoverCard {
         theme: &Theme,
         item: &DiscoverItem,
         image_cache: &ImageCache,
-        screen_width: f32,
+        card_width: f32,
     ) -> Option<DiscoverAction> {
         let mut action = None;
         
         // Netflix-style poster dimensions
-        let card_width = dimensions::card_width(screen_width);
         let card_height = dimensions::poster_height(card_width);
         let total_height = card_height + 55.0; // Space for text below
         
         let (rect, response) = ui.allocate_exact_size(
-            Vec2::new(card_width + 8.0, total_height),
+            Vec2::new(card_width, total_height),
             egui::Sense::click(),
         );
         
@@ -39,7 +38,7 @@ impl DiscoverCard {
             
             // Poster area
             let poster_rect = egui::Rect::from_min_size(
-                rect.min + Vec2::new(4.0, 0.0),
+                rect.min,
                 Vec2::new(card_width, card_height),
             );
             
@@ -172,21 +171,15 @@ impl DiscoverCard {
             
             // Title below poster
             let title_y = poster_rect.max.y + 8.0;
-            let is_mobile = dimensions::is_mobile(screen_width);
-            let max_chars = if is_mobile { 18 } else { 22 };
-            let display_title = if item.title.chars().count() > max_chars {
-                format!("{}...", item.title.chars().take(max_chars - 3).collect::<String>())
-            } else {
-                item.title.clone()
-            };
-            
-            painter.text(
-                egui::pos2(poster_rect.min.x, title_y),
-                egui::Align2::LEFT_TOP,
-                display_title,
-                egui::FontId::proportional(if is_mobile { 12.0 } else { 13.0 }),
+            let is_small = card_width < 160.0;
+            let title_galley = super::single_line(
+                ui,
+                &item.title,
+                egui::FontId::proportional(if is_small { 13.0 } else { 14.0 }),
                 theme.text_primary,
+                card_width,
             );
+            painter.galley(egui::pos2(poster_rect.min.x, title_y), title_galley, theme.text_primary);
             
             // Year
             if let Some(year) = &item.year {
