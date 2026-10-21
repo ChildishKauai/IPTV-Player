@@ -1738,13 +1738,14 @@ impl IPTVPlayerApp {
                 let inner = drawer_rect.shrink(spacing::LG);
                 ui.allocate_new_ui(egui::UiBuilder::new().max_rect(inner), |ui| {
                     ui.set_min_size(inner.size());
-                    ui.horizontal(|ui| {
+                    let size = self.layout.touch_target();
+                    let header = egui::vec2(ui.available_width(), size);
+                    ui.allocate_ui_with_layout(header, egui::Layout::left_to_right(egui::Align::Center), |ui| {
                         ui.label(egui::RichText::new(self.current_content.title())
                             .size(typography::H3)
                             .color(theme.text_primary)
                             .strong());
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            let size = self.layout.touch_target();
                             let close = egui::Button::new(egui::RichText::new("🗙").size(18.0).color(theme.text_secondary))
                                 .fill(egui::Color32::TRANSPARENT)
                                 .stroke(egui::Stroke::NONE)
@@ -1923,7 +1924,7 @@ impl eframe::App for IPTVPlayerApp {
 
             // Episode dialog - use cached state for fast rendering
             if let Some(ref mut state) = self.episode_dialog_state {
-                if let Some(action) = EpisodeDialog::show(ctx, state, &self.config.player_settings) {
+                if let Some(action) = EpisodeDialog::show(ctx, &theme, state, &self.config.player_settings) {
                     match action {
                         episode_dialog::EpisodeAction::PlayEpisode { episode_id, series_name, season, episode, title, container } => {
                             self.play_episode(&episode_id, &series_name, season, episode, &title, &container);
@@ -1962,6 +1963,7 @@ impl eframe::App for IPTVPlayerApp {
             if self.show_epg_settings {
                 if let Some(action) = EpgSettingsDialog::show(
                     ctx,
+                    &theme,
                     &mut self.temp_epg_enabled,
                     &mut self.temp_epg_url,
                 ) {

@@ -3,7 +3,7 @@
 //! Configure external EPG sources with a premium settings experience.
 
 use eframe::egui;
-use crate::ui::theme::{spacing, typography, radius};
+use crate::ui::theme::{Theme, spacing, typography, radius};
 
 /// Actions returned by the EPG settings dialog.
 #[derive(Debug, Clone)]
@@ -21,19 +21,20 @@ impl EpgSettingsDialog {
     /// Shows the EPG settings dialog.
     pub fn show(
         ctx: &egui::Context,
+        theme: &Theme,
         epg_enabled: &mut bool,
         epg_url: &mut String,
     ) -> Option<EpgSettingsAction> {
         let mut action = None;
 
         // Colors
-        let bg = egui::Color32::from_rgb(18, 18, 18);
-        let card_bg = egui::Color32::from_rgb(28, 28, 28);
-        let text_primary = egui::Color32::WHITE;
-        let text_secondary = egui::Color32::from_rgb(170, 170, 170);
-        let text_tertiary = egui::Color32::from_rgb(128, 128, 128);
-        let accent = egui::Color32::from_rgb(255, 90, 95);
-        let info_bg = egui::Color32::from_rgb(20, 35, 50);
+        let bg = theme.card_bg;
+        let card_bg = theme.inactive_bg();
+        let text_primary = theme.text_primary;
+        let text_secondary = theme.text_secondary;
+        let text_tertiary = theme.text_tertiary;
+        let accent = theme.accent_blue;
+        let info_bg = theme.accent_blue.linear_multiply(0.12);
 
         egui::Window::new("")
             .resizable(false)
@@ -49,7 +50,7 @@ impl EpgSettingsDialog {
                     .fill(bg)
                     .rounding(egui::Rounding::same(radius::XL))
                     .inner_margin(egui::Margin::same(spacing::XL))
-                    .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(38, 38, 38))),
+                    .stroke(egui::Stroke::new(1.0, theme.border_color)),
             )
             .show(ctx, |ui| {
                 // Header
@@ -186,9 +187,9 @@ impl EpgSettingsDialog {
                                         }),
                                 )
                                 .fill(if *epg_enabled {
-                                    egui::Color32::from_rgb(40, 40, 40)
+                                    theme.hover_bg()
                                 } else {
-                                    egui::Color32::from_rgb(30, 30, 30)
+                                    bg
                                 })
                                 .min_size(egui::vec2(52.0, 36.0))
                                 .rounding(egui::Rounding::same(radius::MD));
@@ -225,7 +226,7 @@ impl EpgSettingsDialog {
                                     "External EPG supplements Xtream API. Channels with tvg-id use external EPG first.",
                                 )
                                 .size(typography::CAPTION)
-                                .color(egui::Color32::from_rgb(150, 180, 210)),
+                                .color(text_secondary),
                             );
                         });
                     });

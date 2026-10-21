@@ -8,7 +8,7 @@ use std::sync::mpsc::{channel, Receiver};
 use std::thread;
 use crate::api::XtreamClient;
 use crate::models::PlayerSettings;
-use crate::ui::theme::{spacing, typography, radius};
+use crate::ui::theme::{Theme, spacing, typography, radius};
 
 /// Actions that can be triggered from the episode dialog.
 #[derive(Debug, Clone)]
@@ -201,6 +201,7 @@ impl EpisodeDialog {
     /// Renders the episode dialog.
     pub fn show(
         ctx: &egui::Context,
+        theme: &Theme,
         state: &mut EpisodeDialogState,
         _player_settings: &PlayerSettings,
     ) -> Option<EpisodeAction> {
@@ -209,12 +210,12 @@ impl EpisodeDialog {
         let mut action: Option<EpisodeAction> = None;
 
         // Colors
-        let bg = egui::Color32::from_rgb(18, 18, 18);
-        let card_bg = egui::Color32::from_rgb(28, 28, 28);
-        let text_primary = egui::Color32::WHITE;
-        let text_secondary = egui::Color32::from_rgb(170, 170, 170);
-        let text_tertiary = egui::Color32::from_rgb(128, 128, 128);
-        let accent = egui::Color32::from_rgb(255, 90, 95);
+        let bg = theme.card_bg;
+        let card_bg = theme.inactive_bg();
+        let text_primary = theme.text_primary;
+        let text_secondary = theme.text_secondary;
+        let text_tertiary = theme.text_tertiary;
+        let accent = theme.accent_blue;
 
         egui::Window::new("")
             .resizable(true)
@@ -231,7 +232,7 @@ impl EpisodeDialog {
                     .fill(bg)
                     .rounding(egui::Rounding::same(radius::XL))
                     .inner_margin(egui::Margin::same(0.0))
-                    .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(38, 38, 38))),
+                    .stroke(egui::Stroke::new(1.0, theme.border_color)),
             )
             .show(ctx, |ui| {
                 egui::Frame::none()
@@ -275,7 +276,7 @@ impl EpisodeDialog {
                                     ui.label(
                                         egui::RichText::new(format!("Error: {}", e))
                                             .size(typography::BODY)
-                                            .color(egui::Color32::from_rgb(255, 69, 58)),
+                                            .color(theme.error_color),
                                     );
 
                                     ui.with_layout(
@@ -353,7 +354,7 @@ impl EpisodeDialog {
                                         let btn_text = format!("Season {}", season_key);
 
                                         let (bg_color, fg_color) = if is_selected {
-                                            (text_primary, egui::Color32::BLACK)
+                                            (text_primary, bg)
                                         } else {
                                             (card_bg, text_secondary)
                                         };

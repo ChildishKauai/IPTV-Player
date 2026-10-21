@@ -244,33 +244,43 @@ impl TopNavigation {
             ui.memory_mut(|m| m.toggle_popup(popup_id));
         }
 
-        egui::popup::popup_above_or_below_widget(
-            ui,
-            popup_id,
-            &response,
-            egui::AboveOrBelow::Below,
-            egui::PopupCloseBehavior::CloseOnClick,
-            |ui| {
-                ui.set_min_width(220.0);
-                ui.spacing_mut().item_spacing.y = spacing::XS;
-                let theme_label = if theme.dark_mode { "☀  Light mode" } else { "🌙  Dark mode" };
-                let items = [
-                    ("🎬  Player settings", NavAction::OpenPlayerSettings),
-                    ("📺  TV guide (EPG)", NavAction::OpenEpgSettings),
-                    ("⚽  Sports fixtures", NavAction::OpenScraperSettings),
-                    (theme_label, NavAction::ToggleTheme),
-                ];
-                for (label, item_action) in items {
-                    if Self::menu_item(ui, label, theme.text_primary).clicked() {
-                        action = Some(item_action);
+        if !ui.memory(|m| m.is_popup_open(popup_id)) {
+            return None;
+        }
+
+        // Right-aligned under the button so the menu never runs off-screen
+        let area = egui::Area::new(popup_id)
+            .order(egui::Order::Foreground)
+            .pivot(egui::Align2::RIGHT_TOP)
+            .fixed_pos(response.rect.right_bottom() + egui::vec2(0.0, spacing::XS))
+            .constrain(true)
+            .show(ui.ctx(), |ui| {
+                egui::Frame::popup(ui.style()).show(ui, |ui| {
+                    ui.set_width(220.0);
+                    ui.spacing_mut().item_spacing.y = spacing::XS;
+                    let theme_label = if theme.dark_mode { "☀  Light mode" } else { "🌙  Dark mode" };
+                    let items = [
+                        ("🎬  Player settings", NavAction::OpenPlayerSettings),
+                        ("📺  TV guide (EPG)", NavAction::OpenEpgSettings),
+                        ("⚽  Sports fixtures", NavAction::OpenScraperSettings),
+                        (theme_label, NavAction::ToggleTheme),
+                    ];
+                    for (label, item_action) in items {
+                        if Self::menu_item(ui, label, theme.text_primary).clicked() {
+                            action = Some(item_action);
+                        }
                     }
-                }
-                ui.separator();
-                if Self::menu_item(ui, "🚪  Sign out", theme.error_color).clicked() {
-                    action = Some(NavAction::Disconnect);
-                }
-            },
-        );
+                    ui.separator();
+                    if Self::menu_item(ui, "🚪  Sign out", theme.error_color).clicked() {
+                        action = Some(NavAction::Disconnect);
+                    }
+                });
+            });
+
+        // Close after choosing an item or clicking anywhere else
+        if action.is_some() || (area.response.clicked_elsewhere() && !response.clicked()) {
+            ui.memory_mut(|m| m.close_popup());
+        }
 
         action
     }
