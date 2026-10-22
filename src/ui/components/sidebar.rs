@@ -6,7 +6,6 @@
 use eframe::egui;
 use crate::models::Category;
 use crate::ui::theme::{Theme, spacing, typography, radius};
-use crate::ui::messages::ContentType;
 
 /// Category sidebar component - Modern design
 pub struct CategorySidebar;
@@ -17,7 +16,7 @@ impl CategorySidebar {
     pub fn show(
         ui: &mut egui::Ui,
         theme: &Theme,
-        _content_type: ContentType,
+        item_height: f32,
         categories: &[Category],
         selected_category: &Option<String>,
         category_search: &mut String,
@@ -25,19 +24,10 @@ impl CategorySidebar {
         let mut selection_changed: Option<Option<String>> = None;
 
         // Sizing
-        let item_height = 44.0;
         let font_size = typography::BODY_SM;
 
         ui.add_space(spacing::SM);
-
-        // Header
-        ui.label(
-            egui::RichText::new("Categories")
-                .size(typography::CAPTION)
-                .color(theme.text_tertiary),
-        );
-
-        ui.add_space(spacing::MD);
+        Self::header(ui, theme, "Categories");
 
         // Search input
         egui::Frame::none()
@@ -45,6 +35,7 @@ impl CategorySidebar {
             .rounding(egui::Rounding::same(radius::MD))
             .inner_margin(egui::Margin::symmetric(spacing::MD, spacing::SM))
             .show(ui, |ui| {
+                ui.set_width(ui.available_width());
                 ui.horizontal(|ui| {
                     ui.label(
                         egui::RichText::new("🔍")
@@ -59,7 +50,7 @@ impl CategorySidebar {
                                 .size(font_size)
                                 .color(theme.text_muted),
                         )
-                        .desired_width(ui.available_width() - 30.0)
+                        .desired_width(ui.available_width())
                         .font(egui::FontId::proportional(font_size))
                         .frame(false);
 
@@ -147,8 +138,19 @@ impl CategorySidebar {
         selection_changed
     }
 
+    /// Small uppercase section header
+    pub fn header(ui: &mut egui::Ui, theme: &Theme, text: &str) {
+        ui.label(
+            egui::RichText::new(text.to_uppercase())
+                .size(typography::LABEL)
+                .color(theme.text_tertiary)
+                .strong(),
+        );
+        ui.add_space(spacing::MD);
+    }
+
     /// Creates a category button with modern styling
-    fn category_button(
+    pub fn category_button(
         ui: &mut egui::Ui,
         theme: &Theme,
         text: &str,
@@ -157,7 +159,6 @@ impl CategorySidebar {
         font_size: f32,
     ) -> egui::Response {
         let available_width = ui.available_width();
-        let display_text = truncate_text(text, 26);
 
         let (rect, response) =
             ui.allocate_exact_size(egui::vec2(available_width, height), egui::Sense::click());
@@ -191,10 +192,12 @@ impl CategorySidebar {
             theme.text_secondary
         };
 
-        let galley = ui.painter().layout_no_wrap(
-            display_text,
+        let galley = super::single_line(
+            ui,
+            text,
             egui::FontId::proportional(font_size),
             text_color,
+            available_width - spacing::LG * 2.0,
         );
 
         let text_pos = egui::pos2(
@@ -204,17 +207,5 @@ impl CategorySidebar {
         ui.painter().galley(text_pos, galley, text_color);
 
         response
-    }
-}
-
-/// Truncates text to a maximum length with ellipsis.
-fn truncate_text(text: &str, max_len: usize) -> String {
-    if text.chars().count() > max_len {
-        format!(
-            "{}...",
-            text.chars().take(max_len.saturating_sub(3)).collect::<String>()
-        )
-    } else {
-        text.to_string()
     }
 }

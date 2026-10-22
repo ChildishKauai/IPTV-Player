@@ -31,7 +31,7 @@ impl ScraperSettingsDialog {
         ui.separator();
 
         if !scraper_available {
-            ui.label(egui::RichText::new("⚠️ Soccer Scraper not found")
+            ui.label(egui::RichText::new("⚠ Soccer Scraper not found")
                 .color(theme.warning_color));
             ui.label("Ensure Soccer-Scraper-main directory exists in the app folder");
         } else {
@@ -43,7 +43,7 @@ impl ScraperSettingsDialog {
                     if ui.button("🔄 Scrape Fixtures Now").clicked() {
                         action = Some(ScraperAction::TriggerScrape);
                     }
-                    ui.label("⏱️ Takes approximately 2 minutes");
+                    ui.label("⏱ Takes approximately 2 minutes");
                 }
                 ScrapingStatus::Scraping => {
                     ui.label(egui::RichText::new("⏳ Scraping in progress...")

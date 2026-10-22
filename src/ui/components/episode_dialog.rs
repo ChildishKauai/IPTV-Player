@@ -7,8 +7,8 @@ use eframe::egui;
 use std::sync::mpsc::{channel, Receiver};
 use std::thread;
 use crate::api::XtreamClient;
-use crate::models::PlayerSettings;
-use crate::ui::theme::{spacing, typography, radius};
+use crate::models::{NextEpisode, WatchHistory};
+use crate::ui::theme::{Theme, spacing, typography, radius};
 
 /// Actions that can be triggered from the episode dialog.
 #[derive(Debug, Clone)]
@@ -21,6 +21,11 @@ pub enum EpisodeAction {
         episode: i32,
         title: String,
         container: String,
+        series_id: i32,
+        /// Series poster, for Continue Watching
+        cover: Option<String>,
+        /// The following episode, offered as "Up next"
+        next: Option<NextEpisode>,
     },
     /// Close the dialog
     Close,
@@ -40,6 +45,7 @@ struct EpisodeData {
 struct SeriesData {
     name: String,
     plot: String,
+    cover: Option<String>,
     seasons: Vec<(String, Vec<EpisodeData>)>,
 }
 
@@ -52,7 +58,6 @@ enum LoadingState {
 
 /// Episode dialog state - stored in the app to persist between frames.
 pub struct EpisodeDialogState {
-    #[allow(dead_code)]
     series_id: i32,
     state: LoadingState,
     rx: Option<Receiver<Result<SeriesData, String>>>,
@@ -100,62 +105,15 @@ impl EpisodeDialogState {
                             .to_string();
                     }
 
-                    let mut seasons: Vec<(String, Vec<EpisodeData>)> = Vec::new();
+                    let seasons = parse_seasons(&info);
+                    let cover = info
+                        .get("info")
+                        .and_then(|i| i.get("cover"))
+                        .and_then(|v| v.as_str())
+                        .filter(|s| !s.is_empty())
+                        .map(String::from);
 
-                    if let Some(episodes) = info.get("episodes").and_then(|v| v.as_object()) {
-                        let mut season_keys: Vec<_> = episodes.keys().collect();
-                        season_keys.sort_by(|a, b| {
-                            a.parse::<i32>()
-                                .unwrap_or(0)
-                                .cmp(&b.parse::<i32>().unwrap_or(0))
-                        });
-
-                        for season_key in season_keys {
-                            if let Some(season_episodes) =
-                                episodes.get(season_key).and_then(|v| v.as_array())
-                            {
-                                let eps: Vec<EpisodeData> = season_episodes
-                                    .iter()
-                                    .map(|ep| {
-                                        let id = if let Some(id_str) =
-                                            ep.get("id").and_then(|v| v.as_str())
-                                        {
-                                            id_str.to_string()
-                                        } else if let Some(id_num) =
-                                            ep.get("id").and_then(|v| v.as_i64())
-                                        {
-                                            id_num.to_string()
-                                        } else {
-                                            String::new()
-                                        };
-
-                                        EpisodeData {
-                                            id,
-                                            num: ep
-                                                .get("episode_num")
-                                                .and_then(|v| v.as_i64())
-                                                .unwrap_or(0),
-                                            title: ep
-                                                .get("title")
-                                                .and_then(|v| v.as_str())
-                                                .unwrap_or("Unknown")
-                                                .to_string(),
-                                            container: ep
-                                                .get("container_extension")
-                                                .and_then(|v| v.as_str())
-                                                .unwrap_or("mp4")
-                                                .to_string(),
-                                            season: season_key.clone(),
-                                        }
-                                    })
-                                    .collect();
-
-                                seasons.push((season_key.clone(), eps));
-                            }
-                        }
-                    }
-
-                    let _ = tx.send(Ok(SeriesData { name, plot, seasons }));
+                    let _ = tx.send(Ok(SeriesData { name, plot, cover, seasons }));
                 }
                 Err(e) => {
                     let _ = tx.send(Err(format!("Failed to load: {}", e)));
@@ -198,37 +156,42 @@ impl EpisodeDialogState {
 pub struct EpisodeDialog;
 
 impl EpisodeDialog {
-    /// Renders the episode dialog.
+    /// Renders the episode dialog. `history` marks episodes that were
+    /// started and offers to resume them.
     pub fn show(
         ctx: &egui::Context,
+        theme: &Theme,
         state: &mut EpisodeDialogState,
-        _player_settings: &PlayerSettings,
+        history: &WatchHistory,
     ) -> Option<EpisodeAction> {
         state.check_for_data();
 
         let mut action: Option<EpisodeAction> = None;
 
         // Colors
-        let bg = egui::Color32::from_rgb(18, 18, 18);
-        let card_bg = egui::Color32::from_rgb(28, 28, 28);
-        let text_primary = egui::Color32::WHITE;
-        let text_secondary = egui::Color32::from_rgb(170, 170, 170);
-        let text_tertiary = egui::Color32::from_rgb(128, 128, 128);
-        let accent = egui::Color32::from_rgb(255, 90, 95);
+        let bg = theme.card_bg;
+        let card_bg = theme.inactive_bg();
+        let text_primary = theme.text_primary;
+        let text_secondary = theme.text_secondary;
+        let text_tertiary = theme.text_tertiary;
+        let accent = theme.accent_blue;
 
         egui::Window::new("")
             .resizable(true)
             .collapsible(false)
             .title_bar(false)
-            .default_width(850.0)
-            .default_height(600.0)
+            // Fit inside small windows (phones, split screen)
+            .default_width((850.0f32).min(ctx.screen_rect().width() - 72.0))
+            .max_width(ctx.screen_rect().width() - 72.0)
+            .max_height(ctx.screen_rect().height() - 72.0)
+            .default_height((600.0f32).min(ctx.screen_rect().height() - 72.0))
             .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
             .frame(
                 egui::Frame::none()
                     .fill(bg)
                     .rounding(egui::Rounding::same(radius::XL))
                     .inner_margin(egui::Margin::same(0.0))
-                    .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(38, 38, 38))),
+                    .stroke(egui::Stroke::new(1.0, theme.border_color)),
             )
             .show(ctx, |ui| {
                 egui::Frame::none()
@@ -252,7 +215,7 @@ impl EpisodeDialog {
                                             if ui
                                                 .add(
                                                     egui::Button::new(
-                                                        egui::RichText::new("✕")
+                                                        egui::RichText::new("🗙")
                                                             .size(20.0)
                                                             .color(text_secondary),
                                                     )
@@ -272,7 +235,7 @@ impl EpisodeDialog {
                                     ui.label(
                                         egui::RichText::new(format!("Error: {}", e))
                                             .size(typography::BODY)
-                                            .color(egui::Color32::from_rgb(255, 69, 58)),
+                                            .color(theme.error_color),
                                     );
 
                                     ui.with_layout(
@@ -281,7 +244,7 @@ impl EpisodeDialog {
                                             if ui
                                                 .add(
                                                     egui::Button::new(
-                                                        egui::RichText::new("✕")
+                                                        egui::RichText::new("🗙")
                                                             .size(20.0)
                                                             .color(text_secondary),
                                                     )
@@ -312,7 +275,7 @@ impl EpisodeDialog {
                                             if ui
                                                 .add(
                                                     egui::Button::new(
-                                                        egui::RichText::new("✕")
+                                                        egui::RichText::new("🗙")
                                                             .size(20.0)
                                                             .color(text_secondary),
                                                     )
@@ -350,7 +313,7 @@ impl EpisodeDialog {
                                         let btn_text = format!("Season {}", season_key);
 
                                         let (bg_color, fg_color) = if is_selected {
-                                            (text_primary, egui::Color32::BLACK)
+                                            (text_primary, bg)
                                         } else {
                                             (card_bg, text_secondary)
                                         };
@@ -400,6 +363,9 @@ impl EpisodeDialog {
                                                 |ui, row_range| {
                                                     for idx in row_range {
                                                         let ep = &episodes[idx];
+                                                        let watched = history.get_progress(&format!("episode:{}", ep.id));
+                                                        let resume = watched.and_then(|p| p.resume_position());
+                                                        let finished = watched.is_some_and(|p| p.is_nearly_finished());
 
                                                         egui::Frame::none()
                                                             .fill(card_bg)
@@ -425,24 +391,41 @@ impl EpisodeDialog {
 
                                                                     // Episode info
                                                                     ui.vertical(|ui| {
-                                                                        let title_display =
-                                                                            truncate_text(
-                                                                                &ep.title,
-                                                                                45,
-                                                                            );
-                                                                        ui.label(
-                                                                            egui::RichText::new(
-                                                                                &title_display,
+
+                                                                        // Leave room for the Play button; elide long titles
+
+                                                                        ui.set_max_width((ui.available_width() - 112.0).max(80.0));
+
+                                                                        ui.add(
+
+                                                                            egui::Label::new(
+
+                                                                                egui::RichText::new(&ep.title)
+
+                                                                                    .size(typography::BODY)
+
+                                                                                    .color(text_primary),
+
                                                                             )
-                                                                            .size(typography::BODY)
-                                                                            .color(text_primary),
+
+                                                                            .truncate(),
+
                                                                         );
+                                                                        let status = match (watched, resume) {
+                                                                            (Some(p), Some(_)) => format!(
+                                                                                " · {} min left",
+                                                                                ((p.duration_seconds - p.position_seconds) / 60.0).ceil().max(1.0) as i64
+                                                                            ),
+                                                                            _ if finished => " · Watched".to_string(),
+                                                                            _ => String::new(),
+                                                                        };
                                                                         ui.label(
                                                                             egui::RichText::new(
                                                                                 format!(
-                                                                                    "S{}:E{}",
+                                                                                    "S{}:E{}{}",
                                                                                     ep.season,
-                                                                                    ep.num
+                                                                                    ep.num,
+                                                                                    status
                                                                                 ),
                                                                             )
                                                                             .size(
@@ -461,7 +444,7 @@ impl EpisodeDialog {
                                                                             let play_btn =
                                                                                 egui::Button::new(
                                                                                     egui::RichText::new(
-                                                                                        "▶ Play",
+                                                                                        if resume.is_some() { "▶ Resume" } else { "▶ Play" },
                                                                                     )
                                                                                     .size(
                                                                                         typography::BODY_SM,
@@ -472,7 +455,7 @@ impl EpisodeDialog {
                                                                                 )
                                                                                 .fill(accent)
                                                                                 .min_size(egui::vec2(
-                                                                                    80.0, 36.0,
+                                                                                    96.0, 36.0,
                                                                                 ))
                                                                                 .rounding(
                                                                                     egui::Rounding::same(
@@ -492,6 +475,9 @@ impl EpisodeDialog {
                                                                                         episode: ep.num as i32,
                                                                                         title: ep.title.clone(),
                                                                                         container: ep.container.clone(),
+                                                                                        series_id: state.series_id,
+                                                                                        cover: data.cover.clone(),
+                                                                                        next: next_after(&data.seasons, &ep.id),
                                                                                     },
                                                                                 );
                                                                             }
@@ -513,6 +499,85 @@ impl EpisodeDialog {
 
         action
     }
+}
+
+/// Reads the seasons and episodes from a `get_series_info` response,
+/// sorted by season number.
+fn parse_seasons(info: &serde_json::Value) -> Vec<(String, Vec<EpisodeData>)> {
+    let mut seasons: Vec<(String, Vec<EpisodeData>)> = Vec::new();
+
+    if let Some(episodes) = info.get("episodes").and_then(|v| v.as_object()) {
+        let mut season_keys: Vec<_> = episodes.keys().collect();
+        season_keys.sort_by(|a, b| {
+            a.parse::<i32>()
+                .unwrap_or(0)
+                .cmp(&b.parse::<i32>().unwrap_or(0))
+        });
+
+        for season_key in season_keys {
+            if let Some(season_episodes) =
+                episodes.get(season_key).and_then(|v| v.as_array())
+            {
+                let eps: Vec<EpisodeData> = season_episodes
+                    .iter()
+                    .map(|ep| {
+                        let id = if let Some(id_str) =
+                            ep.get("id").and_then(|v| v.as_str())
+                        {
+                            id_str.to_string()
+                        } else if let Some(id_num) =
+                            ep.get("id").and_then(|v| v.as_i64())
+                        {
+                            id_num.to_string()
+                        } else {
+                            String::new()
+                        };
+
+                        EpisodeData {
+                            id,
+                            num: ep
+                                .get("episode_num")
+                                .and_then(|v| v.as_i64())
+                                .unwrap_or(0),
+                            title: ep
+                                .get("title")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("Unknown")
+                                .to_string(),
+                            container: ep
+                                .get("container_extension")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("mp4")
+                                .to_string(),
+                            season: season_key.clone(),
+                        }
+                    })
+                    .collect();
+
+                seasons.push((season_key.clone(), eps));
+            }
+        }
+    }
+
+    seasons
+}
+
+/// The episode that follows `episode_id` in a `get_series_info` response,
+/// continuing into the next season.
+pub fn find_next_episode(info: &serde_json::Value, episode_id: &str) -> Option<NextEpisode> {
+    next_after(&parse_seasons(info), episode_id)
+}
+
+fn next_after(seasons: &[(String, Vec<EpisodeData>)], episode_id: &str) -> Option<NextEpisode> {
+    let mut episodes = seasons.iter().flat_map(|(_, eps)| eps.iter());
+    episodes.find(|ep| ep.id == episode_id)?;
+    episodes.next().map(|ep| NextEpisode {
+        episode_id: ep.id.clone(),
+        season: ep.season.parse().unwrap_or(0),
+        episode: ep.num as i32,
+        title: ep.title.clone(),
+        container: ep.container.clone(),
+    })
 }
 
 fn truncate_text(text: &str, max_len: usize) -> String {

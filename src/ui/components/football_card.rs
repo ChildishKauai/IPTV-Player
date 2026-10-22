@@ -94,7 +94,8 @@ impl FootballCard {
         let row_height = 80.0;
 
         egui::Frame::none()
-            .fill(Color32::from_rgb(30, 30, 30))
+            .fill(theme.card_bg)
+            .stroke(egui::Stroke::new(1.0, theme.border_color))
             .rounding(Rounding::same(6.0))
             .inner_margin(egui::Margin::symmetric(16.0, 12.0))
             .show(ui, |ui| {
@@ -125,7 +126,7 @@ impl FootballCard {
                         ui.label(egui::RichText::new(format!("{} vs {}",
                             fixture.home_team, fixture.away_team))
                             .size(13.0)
-                            .color(Color32::WHITE));
+                            .color(theme.text_primary));
                     });
 
                     ui.add_space(16.0);
@@ -158,9 +159,9 @@ impl FootballCard {
                                     let btn = egui::Button::new(
                                         egui::RichText::new(&display_name)
                                             .size(9.5)
-                                            .color(Color32::from_rgb(220, 220, 220))
+                                            .color(theme.text_secondary)
                                     )
-                                    .fill(Color32::from_rgb(45, 45, 45))
+                                    .fill(theme.inactive_bg())
                                     .rounding(Rounding::same(12.0))
                                     .min_size(egui::vec2(0.0, 22.0));
 

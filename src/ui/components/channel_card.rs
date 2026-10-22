@@ -5,7 +5,7 @@
 
 use eframe::egui;
 use crate::models::{Channel, EpgProgram};
-use crate::ui::theme::{Theme, dimensions, spacing, typography, radius};
+use crate::ui::theme::{Theme, spacing, typography, radius};
 use crate::ui::image_cache::ImageCache;
 
 /// Actions that can be triggered from a channel card.
@@ -46,20 +46,15 @@ impl ChannelCard {
         channel: &Channel,
         is_favorite: bool,
         image_cache: &ImageCache,
-        screen_width: f32,
+        card_width: f32,
         epg_info: Option<&ChannelEpgInfo>,
     ) -> Option<ChannelAction> {
         let mut action: Option<ChannelAction> = None;
-        let is_mobile = dimensions::is_mobile(screen_width);
+        let is_small = card_width < 340.0;
 
-        // Card dimensions - wider for better content display
-        let card_width = if is_mobile {
-            (screen_width - 40.0).max(300.0)
-        } else {
-            360.0
-        };
-        let card_height = if is_mobile { 88.0 } else { 96.0 };
-        let icon_size = if is_mobile { 52.0 } else { 60.0 };
+        // Card dimensions - width comes from the responsive grid
+        let card_height = if is_small { 88.0 } else { 96.0 };
+        let icon_size = if is_small { 52.0 } else { 60.0 };
 
         // Load image if needed
         if !channel.stream_icon.is_empty() {
@@ -68,9 +63,14 @@ impl ChannelCard {
 
         // Allocate card space
         let (rect, response) = ui.allocate_exact_size(
-            egui::vec2(card_width + spacing::MD, card_height + spacing::SM),
+            egui::vec2(card_width, card_height),
             egui::Sense::click(),
         );
+
+        // Keep gamepad/keyboard focus visible inside scrolling rows and grids
+        if response.gained_focus() {
+            response.scroll_to_me(None);
+        }
 
         if response.clicked() {
             action = Some(ChannelAction::Play(channel.clone()));
@@ -78,10 +78,7 @@ impl ChannelCard {
 
         let is_hovered = response.hovered();
         let has_focus = response.has_focus();
-        let card_rect = egui::Rect::from_min_size(
-            rect.min + egui::vec2(spacing::XS, spacing::XS),
-            egui::vec2(card_width, card_height),
-        );
+        let card_rect = rect;
 
         // Card background with subtle shadow on hover or focus (for gamepad navigation)
         if is_hovered || has_focus {
@@ -143,12 +140,13 @@ impl ChannelCard {
         let content_x = icon_rect.max.x + spacing::MD;
         let content_width = card_width - icon_size - spacing::LG * 2.0 - spacing::MD - 32.0; // Reserve space for favorite
 
-        // Channel name - truncated with ellipsis
-        let name_text = truncate_text(&channel.name, if is_mobile { 25 } else { 32 });
-        let name_galley = ui.painter().layout_no_wrap(
-            name_text,
-            egui::FontId::proportional(if is_mobile { typography::BODY_SM } else { typography::BODY }),
+        // Channel name - elided to the available width
+        let name_galley = super::single_line(
+            ui,
+            &channel.name,
+            egui::FontId::proportional(if is_small { typography::BODY_SM } else { typography::BODY }),
             theme.text_primary,
+            content_width,
         );
         ui.painter().galley(
             egui::pos2(content_x, card_rect.min.y + spacing::MD),
@@ -162,11 +160,12 @@ impl ChannelCard {
         if let Some(epg) = epg_info {
             if let Some(current) = &epg.current_program {
                 // Current program title
-                let prog_text = truncate_text(&current.title, if is_mobile { 22 } else { 28 });
-                let prog_galley = ui.painter().layout_no_wrap(
-                    prog_text,
+                let prog_galley = super::single_line(
+                    ui,
+                    &current.title,
                     egui::FontId::proportional(typography::CAPTION),
                     theme.text_secondary,
+                    content_width,
                 );
                 ui.painter().galley(
                     egui::pos2(content_x, card_rect.min.y + spacing::MD + 20.0),
@@ -177,7 +176,7 @@ impl ChannelCard {
                 // Progress bar - thin and elegant
                 let progress = current.progress();
                 let bar_y = card_rect.min.y + spacing::MD + 40.0;
-                let bar_width = content_width.min(180.0);
+                let bar_width = (content_width * 0.45).min(180.0);
                 let bar_height = 3.0;
 
                 let bar_bg_rect = egui::Rect::from_min_size(
@@ -196,19 +195,21 @@ impl ChannelCard {
                 if let Some(next) = &epg.next_program {
                     let time_str = next.start_time_formatted();
                     let next_text = if time_str.is_empty() {
-                        format!("Next: {}", truncate_text(&next.title, 15))
+                        format!("Next: {}", next.title)
                     } else {
-                        format!("{} {}", time_str, truncate_text(&next.title, 12))
+                        format!("{} {}", time_str, next.title)
                     };
-                    let next_galley = ui.painter().layout_no_wrap(
-                        next_text,
+                    let next_galley = super::single_line(
+                        ui,
+                        &next_text,
                         egui::FontId::proportional(typography::LABEL),
-                        theme.text_muted,
+                        theme.text_tertiary,
+                        content_width - bar_width - spacing::SM,
                     );
                     ui.painter().galley(
                         egui::pos2(content_x + bar_width + spacing::SM, bar_y - 1.0),
                         next_galley,
-                        theme.text_muted,
+                        theme.text_tertiary,
                     );
                 }
             }
@@ -290,15 +291,5 @@ impl ChannelCard {
             center.y - galley.size().y / 2.0,
         );
         ui.painter().galley(text_pos, galley, theme.placeholder_icon());
-    }
-}
-
-/// Truncates text to a maximum length with ellipsis.
-fn truncate_text(text: &str, max_len: usize) -> String {
-    if text.chars().count() > max_len {
-        let truncated: String = text.chars().take(max_len.saturating_sub(3)).collect();
-        format!("{}...", truncated)
-    } else {
-        text.to_string()
     }
 }

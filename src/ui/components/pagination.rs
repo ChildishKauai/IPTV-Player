@@ -5,6 +5,7 @@
 
 use eframe::egui;
 use crate::ui::theme::{Theme, spacing, typography, radius};
+use crate::ui::layout::Layout;
 
 /// Pagination component - Modern design
 pub struct Pagination;
@@ -17,7 +18,7 @@ impl Pagination {
         theme: &Theme,
         current_page: usize,
         total_pages: usize,
-        is_touch_mode: bool,
+        layout: &Layout,
     ) -> Option<usize> {
         if total_pages <= 1 {
             return None;
@@ -26,34 +27,51 @@ impl Pagination {
         let mut new_page: Option<usize> = None;
 
         // Touch-friendly sizing
-        let btn_height = if is_touch_mode { 48.0 } else { 40.0 };
-        let page_btn_size = if is_touch_mode { 44.0 } else { 36.0 };
-        let font_size = if is_touch_mode { typography::BODY } else { typography::BODY_SM };
+        let btn_height = layout.touch_target();
+        let page_btn_size = if layout.touch { 44.0 } else { 36.0 };
+        let font_size = if layout.touch { typography::BODY } else { typography::BODY_SM };
+        let compact = layout.is_compact();
 
         ui.add_space(spacing::XL);
 
-        // Center the pagination
-        ui.horizontal(|ui| {
-            // Calculate center offset
-            let available = ui.available_width();
-            let estimated_width = 400.0; // Approximate width of pagination
-            let offset = ((available - estimated_width) / 2.0).max(0.0);
-            ui.add_space(offset);
+        // Center the row using the width measured on the previous frame
+        let width_id = ui.id().with("pagination_width");
+        let last_width: f32 = ui.data(|d| d.get_temp(width_id)).unwrap_or(400.0);
 
-            // Previous button
+        let row = ui.horizontal(|ui| {
+            let offset = ((ui.available_width() - last_width) / 2.0).max(0.0);
+            ui.add_space(offset);
+            let row_start = ui.cursor().min.x;
+
             let prev_enabled = current_page > 0;
-            if Self::nav_button(ui, theme, "Previous", prev_enabled, btn_height, font_size, false) {
+            let next_enabled = current_page < total_pages - 1;
+
+            if compact {
+                // Phones: ‹  Page 3 of 12  ›
+                if Self::nav_button(ui, theme, "‹", prev_enabled, btn_height, font_size + 4.0, btn_height) {
+                    new_page = Some(current_page.saturating_sub(1));
+                }
+                ui.add_space(spacing::SM);
+                ui.label(
+                    egui::RichText::new(format!("Page {} of {}", current_page + 1, total_pages))
+                        .size(font_size)
+                        .color(theme.text_secondary),
+                );
+                ui.add_space(spacing::SM);
+                if Self::nav_button(ui, theme, "›", next_enabled, btn_height, font_size + 4.0, btn_height) {
+                    new_page = Some(current_page + 1);
+                }
+                return ui.cursor().min.x - row_start;
+            }
+
+            if Self::nav_button(ui, theme, "‹  Previous", prev_enabled, btn_height, font_size, 100.0) {
                 new_page = Some(current_page.saturating_sub(1));
             }
 
             ui.add_space(spacing::LG);
 
             // Page numbers (show up to 5 pages)
-            let start_page = if current_page < 2 {
-                0
-            } else {
-                current_page.saturating_sub(2)
-            };
+            let start_page = current_page.saturating_sub(2);
             let end_page = (start_page + 5).min(total_pages);
 
             // First page if not visible
@@ -63,7 +81,7 @@ impl Pagination {
                 }
                 if start_page > 1 {
                     ui.label(
-                        egui::RichText::new("...")
+                        egui::RichText::new("…")
                             .size(font_size)
                             .color(theme.text_muted),
                     );
@@ -73,10 +91,8 @@ impl Pagination {
             // Page buttons
             for page in start_page..end_page {
                 let is_current = page == current_page;
-                if Self::page_button(ui, theme, page + 1, is_current, page_btn_size, font_size) {
-                    if !is_current {
-                        new_page = Some(page);
-                    }
+                if Self::page_button(ui, theme, page + 1, is_current, page_btn_size, font_size) && !is_current {
+                    new_page = Some(page);
                 }
             }
 
@@ -84,7 +100,7 @@ impl Pagination {
             if end_page < total_pages {
                 if end_page < total_pages - 1 {
                     ui.label(
-                        egui::RichText::new("...")
+                        egui::RichText::new("…")
                             .size(font_size)
                             .color(theme.text_muted),
                     );
@@ -96,12 +112,17 @@ impl Pagination {
 
             ui.add_space(spacing::LG);
 
-            // Next button
-            let next_enabled = current_page < total_pages - 1;
-            if Self::nav_button(ui, theme, "Next", next_enabled, btn_height, font_size, true) {
+            if Self::nav_button(ui, theme, "Next  ›", next_enabled, btn_height, font_size, 100.0) {
                 new_page = Some(current_page + 1);
             }
+            ui.cursor().min.x - row_start
         });
+
+        let measured = row.inner;
+        if (measured - last_width).abs() > 0.5 {
+            ui.data_mut(|d| d.insert_temp(width_id, measured));
+            ui.ctx().request_repaint();
+        }
 
         ui.add_space(spacing::MD);
 
@@ -112,22 +133,16 @@ impl Pagination {
     fn nav_button(
         ui: &mut egui::Ui,
         theme: &Theme,
-        text: &str,
+        label: &str,
         enabled: bool,
         height: f32,
         font_size: f32,
-        is_next: bool,
+        min_width: f32,
     ) -> bool {
         let text_color = if enabled {
             theme.text_primary
         } else {
             theme.text_muted
-        };
-
-        let label = if is_next {
-            format!("{} →", text)
-        } else {
-            format!("← {}", text)
         };
 
         let btn = egui::Button::new(
@@ -141,7 +156,7 @@ impl Pagination {
             egui::Color32::TRANSPARENT
         })
         .rounding(egui::Rounding::same(radius::MD))
-        .min_size(egui::vec2(100.0, height));
+        .min_size(egui::vec2(min_width, height));
 
         ui.add_enabled(enabled, btn).clicked()
     }

@@ -31,13 +31,12 @@ impl MovieCard {
         theme: &Theme,
         movie: &serde_json::Value,
         image_cache: &ImageCache,
-        screen_width: f32,
+        card_width: f32,
     ) -> Option<MovieAction> {
         let mut action: Option<MovieAction> = None;
-        let is_mobile = dimensions::is_mobile(screen_width);
+        let is_small = card_width < 160.0;
 
-        // Card dimensions
-        let card_width = dimensions::card_width(screen_width);
+        // Card dimensions - width comes from the responsive grid
         let poster_height = dimensions::poster_height(card_width);
         let total_height = poster_height + 48.0;
 
@@ -60,9 +59,14 @@ impl MovieCard {
 
         // Allocate card space
         let (rect, response) = ui.allocate_exact_size(
-            egui::vec2(card_width + spacing::SM, total_height + spacing::SM),
+            egui::vec2(card_width, total_height),
             egui::Sense::click(),
         );
+
+        // Keep gamepad/keyboard focus visible inside scrolling rows and grids
+        if response.gained_focus() {
+            response.scroll_to_me(None);
+        }
 
         if response.clicked() {
             action = Some(MovieAction::Play {
@@ -76,7 +80,7 @@ impl MovieCard {
         let is_hovered = response.hovered();
         let has_focus = response.has_focus();
         let poster_rect = egui::Rect::from_min_size(
-            rect.min + egui::vec2(spacing::XS, 0.0),
+            rect.min,
             egui::vec2(card_width, poster_height),
         );
 
@@ -93,8 +97,9 @@ impl MovieCard {
         // Draw poster or placeholder
         if let Some(cover_url) = cover {
             if let Some(texture) = image_cache.get(cover_url) {
-                let uv = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
-                ui.painter().image(texture.id(), poster_rect, uv, egui::Color32::WHITE);
+                egui::Image::new(&texture)
+                    .rounding(radius::LG)
+                    .paint_at(ui, poster_rect);
 
                 // Border - accent color on focus for gamepad navigation
                 let border_color = if has_focus { theme.accent_blue } else { theme.border_color };
@@ -132,7 +137,7 @@ impl MovieCard {
 
             // Play button - centered circle
             let center = poster_rect.center();
-            let play_radius = 32.0;
+            let play_radius = (card_width * 0.16).clamp(22.0, 36.0);
 
             ui.painter().circle_filled(
                 center,
@@ -146,7 +151,7 @@ impl MovieCard {
             );
 
             // Play triangle
-            let tri_size = 14.0;
+            let tri_size = play_radius * 0.45;
             let play_points = vec![
                 egui::pos2(center.x - tri_size * 0.35, center.y - tri_size * 0.6),
                 egui::pos2(center.x - tri_size * 0.35, center.y + tri_size * 0.6),
@@ -161,11 +166,12 @@ impl MovieCard {
 
         // Title below poster
         let title_y = poster_rect.max.y + spacing::SM;
-        let display_name = truncate_text(movie_name, if is_mobile { 18 } else { 22 });
-        let title_galley = ui.painter().layout_no_wrap(
-            display_name,
-            egui::FontId::proportional(if is_mobile { typography::BODY_SM } else { typography::BODY }),
+        let title_galley = super::single_line(
+            ui,
+            movie_name,
+            egui::FontId::proportional(if is_small { typography::BODY_SM } else { typography::BODY }),
             theme.text_primary,
+            card_width,
         );
         ui.painter().galley(
             egui::pos2(poster_rect.min.x, title_y),
@@ -208,17 +214,5 @@ impl MovieCard {
             center.y - galley.size().y / 2.0,
         );
         ui.painter().galley(text_pos, galley, theme.placeholder_icon());
-    }
-}
-
-/// Truncates text to a maximum length with ellipsis.
-fn truncate_text(text: &str, max_len: usize) -> String {
-    if text.chars().count() > max_len {
-        format!(
-            "{}...",
-            text.chars().take(max_len.saturating_sub(3)).collect::<String>()
-        )
-    } else {
-        text.to_string()
     }
 }

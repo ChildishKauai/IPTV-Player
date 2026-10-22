@@ -9,6 +9,7 @@
 //! - Discover cards for TV show discovery
 //! - Football fixture cards for live sports
 //! - Scraper settings for fixture scraping
+//! - Home screen shelves, resume cards and toast notifications
 //! - Common UI utilities
 
 pub mod login;
@@ -24,6 +25,9 @@ pub mod epg_settings;
 pub mod discover_card;
 pub mod football_card;
 pub mod scraper_settings;
+pub mod shelf;
+pub mod resume_card;
+pub mod toast;
 
 pub use login::LoginScreen;
 pub use sidebar::CategorySidebar;
@@ -38,3 +42,32 @@ pub use player_settings::PlayerSettingsDialog;
 pub use epg_settings::EpgSettingsDialog;
 pub use discover_card::{DiscoverCard, DiscoverAction};
 pub use scraper_settings::ScraperSettingsDialog;
+pub use shelf::Shelf;
+pub use resume_card::ResumeCard;
+pub use toast::{ToastKind, Toasts};
+
+use eframe::egui;
+use std::sync::Arc;
+
+/// Lays out `text` on a single line, eliding with "…" if it is wider than
+/// `max_width`. Use this instead of character counts so labels follow the
+/// card width on every screen size.
+pub fn single_line(
+    ui: &egui::Ui,
+    text: &str,
+    font: egui::FontId,
+    color: egui::Color32,
+    max_width: f32,
+) -> Arc<egui::Galley> {
+    let mut job = egui::text::LayoutJob::single_section(
+        text.to_owned(),
+        egui::TextFormat::simple(font, color),
+    );
+    job.wrap = egui::text::TextWrapping {
+        max_width: max_width.max(1.0),
+        max_rows: 1,
+        break_anywhere: true,
+        overflow_character: Some('…'),
+    };
+    ui.painter().layout_job(job)
+}
