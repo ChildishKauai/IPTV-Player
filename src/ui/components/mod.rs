@@ -9,6 +9,7 @@
 //! - Discover cards for TV show discovery
 //! - Football fixture cards for live sports
 //! - Scraper settings for fixture scraping
+//! - Home screen shelves, resume cards and toast notifications
 //! - Common UI utilities
 
 pub mod login;
@@ -24,6 +25,9 @@ pub mod epg_settings;
 pub mod discover_card;
 pub mod football_card;
 pub mod scraper_settings;
+pub mod shelf;
+pub mod resume_card;
+pub mod toast;
 
 pub use login::LoginScreen;
 pub use sidebar::CategorySidebar;
@@ -38,6 +42,9 @@ pub use player_settings::PlayerSettingsDialog;
 pub use epg_settings::EpgSettingsDialog;
 pub use discover_card::{DiscoverCard, DiscoverAction};
 pub use scraper_settings::ScraperSettingsDialog;
+pub use shelf::Shelf;
+pub use resume_card::ResumeCard;
+pub use toast::{ToastKind, Toasts};
 
 use eframe::egui;
 use std::sync::Arc;

@@ -7,7 +7,7 @@ use eframe::egui;
 use std::sync::mpsc::{channel, Receiver};
 use std::thread;
 use crate::api::XtreamClient;
-use crate::models::PlayerSettings;
+use crate::models::{NextEpisode, WatchHistory};
 use crate::ui::theme::{Theme, spacing, typography, radius};
 
 /// Actions that can be triggered from the episode dialog.
@@ -21,6 +21,11 @@ pub enum EpisodeAction {
         episode: i32,
         title: String,
         container: String,
+        series_id: i32,
+        /// Series poster, for Continue Watching
+        cover: Option<String>,
+        /// The following episode, offered as "Up next"
+        next: Option<NextEpisode>,
     },
     /// Close the dialog
     Close,
@@ -40,6 +45,7 @@ struct EpisodeData {
 struct SeriesData {
     name: String,
     plot: String,
+    cover: Option<String>,
     seasons: Vec<(String, Vec<EpisodeData>)>,
 }
 
@@ -52,7 +58,6 @@ enum LoadingState {
 
 /// Episode dialog state - stored in the app to persist between frames.
 pub struct EpisodeDialogState {
-    #[allow(dead_code)]
     series_id: i32,
     state: LoadingState,
     rx: Option<Receiver<Result<SeriesData, String>>>,
@@ -100,62 +105,15 @@ impl EpisodeDialogState {
                             .to_string();
                     }
 
-                    let mut seasons: Vec<(String, Vec<EpisodeData>)> = Vec::new();
+                    let seasons = parse_seasons(&info);
+                    let cover = info
+                        .get("info")
+                        .and_then(|i| i.get("cover"))
+                        .and_then(|v| v.as_str())
+                        .filter(|s| !s.is_empty())
+                        .map(String::from);
 
-                    if let Some(episodes) = info.get("episodes").and_then(|v| v.as_object()) {
-                        let mut season_keys: Vec<_> = episodes.keys().collect();
-                        season_keys.sort_by(|a, b| {
-                            a.parse::<i32>()
-                                .unwrap_or(0)
-                                .cmp(&b.parse::<i32>().unwrap_or(0))
-                        });
-
-                        for season_key in season_keys {
-                            if let Some(season_episodes) =
-                                episodes.get(season_key).and_then(|v| v.as_array())
-                            {
-                                let eps: Vec<EpisodeData> = season_episodes
-                                    .iter()
-                                    .map(|ep| {
-                                        let id = if let Some(id_str) =
-                                            ep.get("id").and_then(|v| v.as_str())
-                                        {
-                                            id_str.to_string()
-                                        } else if let Some(id_num) =
-                                            ep.get("id").and_then(|v| v.as_i64())
-                                        {
-                                            id_num.to_string()
-                                        } else {
-                                            String::new()
-                                        };
-
-                                        EpisodeData {
-                                            id,
-                                            num: ep
-                                                .get("episode_num")
-                                                .and_then(|v| v.as_i64())
-                                                .unwrap_or(0),
-                                            title: ep
-                                                .get("title")
-                                                .and_then(|v| v.as_str())
-                                                .unwrap_or("Unknown")
-                                                .to_string(),
-                                            container: ep
-                                                .get("container_extension")
-                                                .and_then(|v| v.as_str())
-                                                .unwrap_or("mp4")
-                                                .to_string(),
-                                            season: season_key.clone(),
-                                        }
-                                    })
-                                    .collect();
-
-                                seasons.push((season_key.clone(), eps));
-                            }
-                        }
-                    }
-
-                    let _ = tx.send(Ok(SeriesData { name, plot, seasons }));
+                    let _ = tx.send(Ok(SeriesData { name, plot, cover, seasons }));
                 }
                 Err(e) => {
                     let _ = tx.send(Err(format!("Failed to load: {}", e)));
@@ -198,12 +156,13 @@ impl EpisodeDialogState {
 pub struct EpisodeDialog;
 
 impl EpisodeDialog {
-    /// Renders the episode dialog.
+    /// Renders the episode dialog. `history` marks episodes that were
+    /// started and offers to resume them.
     pub fn show(
         ctx: &egui::Context,
         theme: &Theme,
         state: &mut EpisodeDialogState,
-        _player_settings: &PlayerSettings,
+        history: &WatchHistory,
     ) -> Option<EpisodeAction> {
         state.check_for_data();
 
@@ -404,6 +363,9 @@ impl EpisodeDialog {
                                                 |ui, row_range| {
                                                     for idx in row_range {
                                                         let ep = &episodes[idx];
+                                                        let watched = history.get_progress(&format!("episode:{}", ep.id));
+                                                        let resume = watched.and_then(|p| p.resume_position());
+                                                        let finished = watched.is_some_and(|p| p.is_nearly_finished());
 
                                                         egui::Frame::none()
                                                             .fill(card_bg)
@@ -432,7 +394,7 @@ impl EpisodeDialog {
 
                                                                         // Leave room for the Play button; elide long titles
 
-                                                                        ui.set_max_width((ui.available_width() - 96.0).max(80.0));
+                                                                        ui.set_max_width((ui.available_width() - 112.0).max(80.0));
 
                                                                         ui.add(
 
@@ -449,12 +411,21 @@ impl EpisodeDialog {
                                                                             .truncate(),
 
                                                                         );
+                                                                        let status = match (watched, resume) {
+                                                                            (Some(p), Some(_)) => format!(
+                                                                                " · {} min left",
+                                                                                ((p.duration_seconds - p.position_seconds) / 60.0).ceil().max(1.0) as i64
+                                                                            ),
+                                                                            _ if finished => " · Watched".to_string(),
+                                                                            _ => String::new(),
+                                                                        };
                                                                         ui.label(
                                                                             egui::RichText::new(
                                                                                 format!(
-                                                                                    "S{}:E{}",
+                                                                                    "S{}:E{}{}",
                                                                                     ep.season,
-                                                                                    ep.num
+                                                                                    ep.num,
+                                                                                    status
                                                                                 ),
                                                                             )
                                                                             .size(
@@ -473,7 +444,7 @@ impl EpisodeDialog {
                                                                             let play_btn =
                                                                                 egui::Button::new(
                                                                                     egui::RichText::new(
-                                                                                        "▶ Play",
+                                                                                        if resume.is_some() { "▶ Resume" } else { "▶ Play" },
                                                                                     )
                                                                                     .size(
                                                                                         typography::BODY_SM,
@@ -484,7 +455,7 @@ impl EpisodeDialog {
                                                                                 )
                                                                                 .fill(accent)
                                                                                 .min_size(egui::vec2(
-                                                                                    80.0, 36.0,
+                                                                                    96.0, 36.0,
                                                                                 ))
                                                                                 .rounding(
                                                                                     egui::Rounding::same(
@@ -504,6 +475,9 @@ impl EpisodeDialog {
                                                                                         episode: ep.num as i32,
                                                                                         title: ep.title.clone(),
                                                                                         container: ep.container.clone(),
+                                                                                        series_id: state.series_id,
+                                                                                        cover: data.cover.clone(),
+                                                                                        next: next_after(&data.seasons, &ep.id),
                                                                                     },
                                                                                 );
                                                                             }
@@ -525,6 +499,85 @@ impl EpisodeDialog {
 
         action
     }
+}
+
+/// Reads the seasons and episodes from a `get_series_info` response,
+/// sorted by season number.
+fn parse_seasons(info: &serde_json::Value) -> Vec<(String, Vec<EpisodeData>)> {
+    let mut seasons: Vec<(String, Vec<EpisodeData>)> = Vec::new();
+
+    if let Some(episodes) = info.get("episodes").and_then(|v| v.as_object()) {
+        let mut season_keys: Vec<_> = episodes.keys().collect();
+        season_keys.sort_by(|a, b| {
+            a.parse::<i32>()
+                .unwrap_or(0)
+                .cmp(&b.parse::<i32>().unwrap_or(0))
+        });
+
+        for season_key in season_keys {
+            if let Some(season_episodes) =
+                episodes.get(season_key).and_then(|v| v.as_array())
+            {
+                let eps: Vec<EpisodeData> = season_episodes
+                    .iter()
+                    .map(|ep| {
+                        let id = if let Some(id_str) =
+                            ep.get("id").and_then(|v| v.as_str())
+                        {
+                            id_str.to_string()
+                        } else if let Some(id_num) =
+                            ep.get("id").and_then(|v| v.as_i64())
+                        {
+                            id_num.to_string()
+                        } else {
+                            String::new()
+                        };
+
+                        EpisodeData {
+                            id,
+                            num: ep
+                                .get("episode_num")
+                                .and_then(|v| v.as_i64())
+                                .unwrap_or(0),
+                            title: ep
+                                .get("title")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("Unknown")
+                                .to_string(),
+                            container: ep
+                                .get("container_extension")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("mp4")
+                                .to_string(),
+                            season: season_key.clone(),
+                        }
+                    })
+                    .collect();
+
+                seasons.push((season_key.clone(), eps));
+            }
+        }
+    }
+
+    seasons
+}
+
+/// The episode that follows `episode_id` in a `get_series_info` response,
+/// continuing into the next season.
+pub fn find_next_episode(info: &serde_json::Value, episode_id: &str) -> Option<NextEpisode> {
+    next_after(&parse_seasons(info), episode_id)
+}
+
+fn next_after(seasons: &[(String, Vec<EpisodeData>)], episode_id: &str) -> Option<NextEpisode> {
+    let mut episodes = seasons.iter().flat_map(|(_, eps)| eps.iter());
+    episodes.find(|ep| ep.id == episode_id)?;
+    episodes.next().map(|ep| NextEpisode {
+        episode_id: ep.id.clone(),
+        season: ep.season.parse().unwrap_or(0),
+        episode: ep.num as i32,
+        title: ep.title.clone(),
+        container: ep.container.clone(),
+    })
 }
 
 fn truncate_text(text: &str, max_len: usize) -> String {

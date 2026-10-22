@@ -3,7 +3,7 @@
 //! This module defines the message types used for communication between
 //! the UI thread and background worker threads.
 
-use crate::models::{Category, Channel, Series};
+use crate::models::{Category, Channel, NextEpisode, Series};
 
 /// Messages sent from background threads to the main UI thread.
 ///
@@ -31,12 +31,19 @@ pub enum AppMessage {
     
     /// Scraper failed with error
     ScraperFailed(String),
+
+    /// The episode following `episode_id` was looked up (None: last episode)
+    NextEpisodeFound {
+        episode_id: String,
+        next: Option<NextEpisode>,
+    },
 }
 
 /// Content type currently being displayed in the main view.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ContentType {
     #[default]
+    Home,
     LiveTV,
     Series,
     Movies,
@@ -50,6 +57,7 @@ impl ContentType {
     /// Returns the display title for this content type
     pub fn title(&self) -> &'static str {
         match self {
+            ContentType::Home => "Home",
             ContentType::LiveTV => "📺 Live Channels",
             ContentType::Series => "📚 Series",
             ContentType::Movies => "🎬 Movies",
@@ -63,6 +71,7 @@ impl ContentType {
     /// Returns the empty state message
     pub fn empty_message(&self) -> &'static str {
         match self {
+            ContentType::Home => "Nothing here yet",
             ContentType::LiveTV => "No channels found",
             ContentType::Series => "No series found",
             ContentType::Movies => "No movies found",

@@ -10,7 +10,11 @@ A high-performance IPTV player built with Rust and egui for fast, native UI expe
 - ✅ Category browsing (Live TV, Movies, Series)
 - ✅ Search functionality
 - ✅ Favorites system
+- ✅ Home screen with rows: Continue watching, favorite and recent channels, new and top rated movies, updated series
 - ✅ Video playback with mpv/vlc/ffmpeg
+  - Now-playing bar with live status and a Stop button
+  - Plain-language errors when a stream fails (expired subscription, offline stream, player not installed), with "Try again"
+  - Resume where you left off and "Up next" episodes (position is read back from mpv and VLC)
 - ✅ **EPG (Electronic Program Guide) support**
   - Built-in Xtream API EPG
   - External XMLTV EPG (iptv-org/epg compatible)

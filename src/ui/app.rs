@@ -7,19 +7,34 @@
 //! - Background task communication
 
 use eframe::egui;
+use std::collections::HashMap;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::thread;
+use std::time::{Duration, Instant};
 
 use crate::api::XtreamClient;
 use crate::api::DiscoverCategory;
 use crate::api::{FootballCache, FootballCategory};
 use crate::api::ScraperManager;
 use crate::models::*;
+use crate::playback::{self, PlaybackEvent, PlaybackOutcome};
 use super::theme::{Theme, dimensions, spacing, typography};
 use super::layout::Layout;
 use super::messages::{AppMessage, ContentType};
 use super::image_cache::ImageCache;
 use super::components::*;
+use super::now_playing::{self, Media, PlaybackSession};
+
+/// What a toast's button does.
+#[derive(Debug, Clone)]
+enum ToastAction {
+    OpenPlayerSettings,
+    Play(Media),
+    PlayFromStart(Media),
+}
+
+/// Items per Home row.
+const SHELF_ITEMS: usize = 20;
 
 /// Main application struct for the IPTV Player.
 ///
@@ -128,12 +143,43 @@ pub struct IPTVPlayerApp {
     tx: Option<Sender<AppMessage>>,
     
     // ─────────────────────────────────────────────────────────────────────
+    // Playback
+    // ─────────────────────────────────────────────────────────────────────
+
+    /// Players that are running (or just exited), by session id
+    playback_sessions: HashMap<u64, PlaybackSession>,
+    /// Session shown in the now-playing bar
+    current_session: Option<u64>,
+    next_session_id: u64,
+    playback_tx: Sender<PlaybackEvent>,
+    playback_rx: Receiver<PlaybackEvent>,
+    /// When the watch history was last written during playback
+    history_saved_at: Instant,
+    /// Notifications shown at the bottom of the window
+    toasts: Toasts<ToastAction>,
+    /// Kept so background threads can request a repaint
+    egui_ctx: egui::Context,
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Home
+    // ─────────────────────────────────────────────────────────────────────
+
+    /// Index into `all_channels` by stream id
+    channel_index: HashMap<String, usize>,
+    /// Newest movies, for the Home screen
+    home_recent_movies: Vec<serde_json::Value>,
+    /// Best rated movies, for the Home screen
+    home_top_movies: Vec<serde_json::Value>,
+    /// Most recently updated series, for the Home screen
+    home_recent_series: Vec<Series>,
+    /// Movie and series lists have arrived (they may be empty)
+    movies_loaded: bool,
+    series_loaded: bool,
+
+    // ─────────────────────────────────────────────────────────────────────
     // Media
     // ─────────────────────────────────────────────────────────────────────
     
-    /// Current stream URL being played
-    #[allow(dead_code)]
-    current_stream_url: Option<String>,
     /// Image cache for channel/series/movie artwork
     image_cache: ImageCache,
     /// EPG cache for program guide data
@@ -160,9 +206,10 @@ pub struct IPTVPlayerApp {
 
 impl IPTVPlayerApp {
     /// Creates a new application instance.
-    pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
+    pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         let config = Config::load().unwrap_or_default();
         let (tx, rx) = channel();
+        let (playback_tx, playback_rx) = channel();
 
         // Detect Steam Deck environment for scaling
         let is_steam_deck_mode = Self::detect_steam_deck_environment();
@@ -183,7 +230,7 @@ impl IPTVPlayerApp {
             filtered_series: Vec::new(),
             all_movies: Vec::new(),
             filtered_movies: Vec::new(),
-            current_content: ContentType::LiveTV,
+            current_content: ContentType::Home,
             selected_category: None,
             search_query: String::new(),
             category_search: String::new(),
@@ -202,7 +249,20 @@ impl IPTVPlayerApp {
             current_page: 0,
             rx: Some(rx),
             tx: Some(tx),
-            current_stream_url: None,
+            playback_sessions: HashMap::new(),
+            current_session: None,
+            next_session_id: 0,
+            playback_tx,
+            playback_rx,
+            history_saved_at: Instant::now(),
+            toasts: Toasts::default(),
+            egui_ctx: cc.egui_ctx.clone(),
+            channel_index: HashMap::new(),
+            home_recent_movies: Vec::new(),
+            home_top_movies: Vec::new(),
+            home_recent_series: Vec::new(),
+            movies_loaded: false,
+            series_loaded: false,
             config,
             image_cache: ImageCache::new(),
             epg_cache: super::epg_cache::EpgCache::new(),
@@ -345,6 +405,13 @@ impl IPTVPlayerApp {
         self.filtered_series.clear();
         self.all_movies.clear();
         self.filtered_movies.clear();
+        self.channel_index.clear();
+        self.home_recent_movies.clear();
+        self.home_top_movies.clear();
+        self.home_recent_series.clear();
+        self.movies_loaded = false;
+        self.series_loaded = false;
+        self.current_content = ContentType::Home;
         // Clear EPG cache on disconnect
         self.epg_cache.clear();
     }
@@ -500,8 +567,8 @@ impl IPTVPlayerApp {
             ContentType::FootballFixtures => {
                 // Football fixtures use their own filtering system
             }
-            ContentType::ContinueWatching => {
-                // Continue watching doesn't use traditional filtering
+            ContentType::Home | ContentType::ContinueWatching => {
+                // Home and Continue Watching don't use traditional filtering
             }
         }
     }
@@ -509,127 +576,266 @@ impl IPTVPlayerApp {
     // ═══════════════════════════════════════════════════════════════════════
     // Playback Methods
     // ═══════════════════════════════════════════════════════════════════════
-    
-    /// Plays a live channel using the configured media player.
-    fn play_channel(&mut self, channel: &Channel) {
-        let client = XtreamClient::new(
-            self.server_url.clone(),
-            self.username.clone(),
-            self.password.clone(),
-        );
-        
-        let url = client.get_live_stream_url(&channel.stream_id);
-        self.current_stream_url = Some(url.clone());
-        
-        // Launch the configured player (live stream = true)
-        let _ = self.config.player_settings.launch_player(&url, &channel.name, true);
+
+    /// Plays `media`, resuming where it was left off.
+    fn play(&mut self, media: Media) {
+        self.play_from(media, false);
     }
-    
-    /// Plays a movie using the configured media player.
-    fn play_movie(&mut self, stream_id: i64, name: &str, container_extension: &str, thumbnail: Option<String>) {
+
+    /// Plays `media` in the configured external player. Only one stream
+    /// plays at a time - most providers limit concurrent connections.
+    fn play_from(&mut self, media: Media, from_start: bool) {
         let client = XtreamClient::new(
             self.server_url.clone(),
             self.username.clone(),
             self.password.clone(),
         );
-        let url = client.get_stream_url(&stream_id.to_string(), container_extension);
-        
-        // Add to watch history
-        let progress = crate::models::watch_history::WatchProgress {
-            content_id: stream_id.to_string(),
-            content_name: name.to_string(),
-            content_type: "movie".to_string(),
-            position_seconds: 0.0,
-            duration_seconds: 0.0, // We don't know duration yet
-            last_watched: chrono::Utc::now().timestamp(),
-            thumbnail,
-            season: None,
-            episode: None,
+        let url = match &media {
+            Media::Channel { stream_id, .. } => client.get_live_stream_url(stream_id),
+            Media::Movie { stream_id, container, .. } => client.get_stream_url(&stream_id.to_string(), container),
+            Media::Episode { episode_id, container, .. } => client.get_episode_url(episode_id, container),
         };
-        self.watch_history.update_progress(progress);
-        
-        // Launch the configured player (not live stream)
-        let _ = self.config.player_settings.launch_player(&url, name, false);
-    }
-    
-    /// Plays an episode and adds it to watch history.
-    fn play_episode(&mut self, episode_id: &str, series_name: &str, season: i32, episode: i32, title: &str, container: &str) {
-        let client = XtreamClient::new(
-            self.server_url.clone(),
-            self.username.clone(),
-            self.password.clone(),
-        );
-        let url = client.get_episode_url(episode_id, container);
-        let window_title = format!("S{}E{}: {}", season, episode, title);
-        
-        // Add to watch history
-        let progress = crate::models::watch_history::WatchProgress {
-            content_id: format!("{}_{}_{}",  series_name, season, episode),
-            content_name: series_name.to_string(),
-            content_type: "series".to_string(),
-            position_seconds: 0.0,
-            duration_seconds: 0.0,
-            last_watched: chrono::Utc::now().timestamp(),
-            thumbnail: None, // We don't have episode thumbnails readily available
-            season: Some(season),
-            episode: Some(episode),
+
+        if let Some(current) = self.current_session.and_then(|id| self.playback_sessions.get(&id)) {
+            current.handle.stop();
+        }
+
+        let start_at = if from_start || media.is_live() {
+            None
+        } else {
+            self.watch_history.resume_position(&media.content_id())
         };
-        self.watch_history.update_progress(progress);
-        
-        // Launch the configured player (not live stream)
-        let _ = self.config.player_settings.launch_player(&url, &window_title, false);
+
+        let session = self.next_session_id;
+        self.next_session_id += 1;
+        let ctx = self.egui_ctx.clone();
+        let settings = &self.config.player_settings;
+
+        match playback::start(
+            settings,
+            session,
+            &url,
+            &media.title(),
+            media.is_live(),
+            start_at,
+            self.playback_tx.clone(),
+            move || ctx.request_repaint(),
+        ) {
+            Ok(handle) => {
+                if let Some(start) = start_at {
+                    self.toasts.push(
+                        ToastKind::Info,
+                        format!("Resuming from {}", now_playing::format_time(start)),
+                        Some(("Start over", ToastAction::PlayFromStart(media.clone()))),
+                    );
+                }
+                if let Media::Episode { series_id: Some(series_id), episode_id, next: None, .. } = &media {
+                    self.find_next_episode(*series_id, episode_id.clone());
+                }
+                self.playback_sessions.insert(session, PlaybackSession {
+                    handle,
+                    media,
+                    player: settings.player_type.short_name(),
+                    playing: false,
+                    position: 0.0,
+                    duration: 0.0,
+                });
+                self.current_session = Some(session);
+            }
+            Err(e) => {
+                let action = e.settings_fix.then_some(("Player settings", ToastAction::OpenPlayerSettings));
+                self.toasts.error(e.message, action);
+            }
+        }
     }
-    
-    /// Resumes playback from continue watching
-    fn resume_playback(&mut self, content_id: &str, content_type: &str, season: Option<i32>, episode: Option<i32>) {
-        match content_type {
+
+    /// Picks up a Continue Watching item: the next episode once one is
+    /// finished, otherwise the item itself from where it was left.
+    fn resume(&mut self, progress: &WatchProgress) {
+        if let Some(media) = Media::from_progress(progress) {
+            match media.next_episode().filter(|_| progress.offers_next_episode()) {
+                Some(next) => self.play(next),
+                None => self.play(media),
+            }
+            return;
+        }
+
+        // Entries from older versions only have a name or id to go on
+        match progress.content_type.as_str() {
             "movie" => {
-                // For movies, content_id is the stream_id
-                if let Ok(stream_id) = content_id.parse::<i64>() {
-                    // Find the movie in our cache to get details
-                    let movie_data = self.all_movies.iter().find(|m| {
-                        m.get("stream_id").and_then(|v| v.as_i64()) == Some(stream_id)
-                    }).map(|movie| {
-                        (
-                            stream_id,
-                            movie.get("name").and_then(|v| v.as_str()).unwrap_or("Unknown").to_string(),
-                            movie.get("container_extension").and_then(|v| v.as_str()).unwrap_or("mp4").to_string(),
-                            movie.get("stream_icon").and_then(|v| v.as_str()).map(|s| s.to_string())
-                        )
-                    });
-                    
-                    if let Some((id, name, container, thumbnail)) = movie_data {
-                        self.play_movie(id, &name, &container, thumbnail);
-                    }
+                let stream_id = progress.content_id.parse::<i64>().ok();
+                let movie = self.all_movies.iter().find(|m| {
+                    m.get("stream_id").and_then(|v| v.as_i64()) == stream_id
+                });
+                if let (Some(movie), Some(stream_id)) = (movie, stream_id) {
+                    let media = Media::Movie {
+                        stream_id,
+                        name: movie.get("name").and_then(|v| v.as_str()).unwrap_or("Unknown").to_string(),
+                        container: movie.get("container_extension").and_then(|v| v.as_str()).unwrap_or("mp4").to_string(),
+                        thumbnail: movie.get("stream_icon").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                    };
+                    self.play(media);
+                } else if !self.movies_loaded {
+                    self.toasts.info("Movies are still loading. Try again in a moment.");
+                } else {
+                    self.toasts.error(format!("\"{}\" is no longer available.", progress.content_name), None);
                 }
             }
             "series" => {
-                // For series, we need to find the series and episode
-                // The content_id format is "series_name_season_episode"
-                if season.is_some() && episode.is_some() {
-                    // Parse the series name from content_id (remove the _season_episode suffix)
-                    let parts: Vec<&str> = content_id.rsplitn(3, '_').collect();
-                    if parts.len() == 3 {
-                        let series_name = parts[2];
-                        
-                        // Find the series in our cache
-                        let series_data = self.all_series.iter()
-                            .find(|s| s.name == series_name)
-                            .map(|s| s.series_id);
-                        
-                        if let Some(series_id) = series_data {
-                            // Open the episode dialog for this series
-                            self.episode_dialog_state = Some(episode_dialog::EpisodeDialogState::new(
-                                series_id,
-                                self.server_url.clone(),
-                                self.username.clone(),
-                                self.password.clone(),
-                            ));
-                        }
-                    }
+                match self.all_series.iter().find(|s| s.name == progress.content_name) {
+                    Some(series) => self.open_series(series.series_id),
+                    None if !self.series_loaded => self.toasts.info("Series are still loading. Try again in a moment."),
+                    None => self.toasts.error(format!("\"{}\" is no longer available.", progress.content_name), None),
                 }
             }
             _ => {}
+        }
+    }
+
+    /// Opens the episode list for a series.
+    fn open_series(&mut self, series_id: i32) {
+        self.episode_dialog_state = Some(episode_dialog::EpisodeDialogState::new(
+            series_id,
+            self.server_url.clone(),
+            self.username.clone(),
+            self.password.clone(),
+        ));
+    }
+
+    /// Looks up the episode after `episode_id` in the background, so
+    /// "Up next" keeps working when an episode wasn't started from the
+    /// episode list.
+    fn find_next_episode(&self, series_id: i32, episode_id: String) {
+        let client = XtreamClient::new(
+            self.server_url.clone(),
+            self.username.clone(),
+            self.password.clone(),
+        );
+        let Some(tx) = self.tx.clone() else { return };
+        thread::spawn(move || {
+            if let Ok(info) = client.get_series_info(series_id) {
+                let next = episode_dialog::find_next_episode(&info, &episode_id);
+                let _ = tx.send(AppMessage::NextEpisodeFound { episode_id, next });
+            }
+        });
+    }
+
+    /// Stores a looked-up next episode on the running session and in the
+    /// watch history.
+    fn set_next_episode(&mut self, episode_id: &str, next: Option<NextEpisode>) {
+        let Some(next) = next else { return };
+        for session in self.playback_sessions.values_mut() {
+            if let Media::Episode { episode_id: id, next: slot @ None, .. } = &mut session.media {
+                if id == episode_id {
+                    *slot = Some(next.clone());
+                }
+            }
+        }
+        if let Some(entry) = self.watch_history.get_progress(&format!("episode:{}", episode_id)) {
+            if entry.next_episode.is_none() {
+                let mut entry = entry.clone();
+                entry.next_episode = Some(next);
+                self.watch_history.update_progress(entry);
+            }
+        }
+    }
+
+    /// Applies events from running players: status, progress, and how
+    /// playback ended.
+    fn process_playback_events(&mut self) {
+        while let Ok(event) = self.playback_rx.try_recv() {
+            match event {
+                PlaybackEvent::Playing { session } => {
+                    if let Some(s) = self.playback_sessions.get_mut(&session) {
+                        s.playing = true;
+                        if s.media.is_live() {
+                            let entry = s.media.history_entry(0.0, 0.0);
+                            self.watch_history.update_progress(entry);
+                        }
+                    }
+                }
+                PlaybackEvent::Progress { session, position, duration } => {
+                    let Some(s) = self.playback_sessions.get_mut(&session) else { continue };
+                    s.position = position;
+                    s.duration = duration;
+                    if !s.media.is_live() && position > 0.0 && duration > 0.0 {
+                        let entry = s.media.history_entry(position, duration);
+                        self.watch_history.update_progress_unsaved(entry);
+                        if self.history_saved_at.elapsed() > Duration::from_secs(15) {
+                            let _ = self.watch_history.save();
+                            self.history_saved_at = Instant::now();
+                        }
+                    }
+                }
+                PlaybackEvent::Ended { session, outcome, position, duration } => {
+                    let Some(s) = self.playback_sessions.remove(&session) else { continue };
+                    if self.current_session == Some(session) {
+                        self.current_session = None;
+                    }
+                    self.playback_ended(s, outcome, position, duration);
+                }
+            }
+        }
+    }
+
+    /// Records how far playback got and tells the viewer what happened.
+    fn playback_ended(&mut self, session: PlaybackSession, outcome: PlaybackOutcome, position: f64, duration: f64) {
+        let media = session.media;
+        let title = media.title();
+
+        // A stream that never played doesn't belong in the history
+        if !matches!(outcome, PlaybackOutcome::Failed(_)) {
+            let mut entry = media.history_entry(position, duration);
+            if let Some(previous) = self.watch_history.get_progress(&entry.content_id) {
+                // Without a reported position, keep the last known one
+                if !media.is_live() && !(position > 0.0 && duration > 0.0) {
+                    entry.position_seconds = previous.position_seconds;
+                    entry.duration_seconds = previous.duration_seconds;
+                }
+                if entry.next_episode.is_none() {
+                    entry.next_episode = previous.next_episode.clone();
+                }
+            }
+            let finished = entry.is_nearly_finished();
+            let next = Media::from_progress(&entry).and_then(|m| m.next_episode());
+            self.watch_history.update_progress(entry);
+            self.history_saved_at = Instant::now();
+
+            // Offer the next episode when one finishes
+            if let (PlaybackOutcome::Finished, true, Some(next)) = (&outcome, finished, next) {
+                self.toasts.push(
+                    ToastKind::Info,
+                    format!("Up next: {}", next.title()),
+                    Some(("▶ Play", ToastAction::Play(next))),
+                );
+            }
+        }
+
+        match outcome {
+            PlaybackOutcome::Failed(reason) => {
+                self.toasts.error(
+                    format!("Couldn't play {}. {}", title, reason),
+                    Some(("Try again", ToastAction::Play(media))),
+                );
+            }
+            PlaybackOutcome::Interrupted(reason) => {
+                let label = if media.is_live() { "Reconnect" } else { "Resume" };
+                self.toasts.push(
+                    ToastKind::Warning,
+                    format!("Playback stopped unexpectedly. {}", reason),
+                    Some((label, ToastAction::Play(media))),
+                );
+            }
+            PlaybackOutcome::Finished | PlaybackOutcome::Stopped => {}
+        }
+    }
+
+    /// Runs a toast's action button.
+    fn handle_toast_action(&mut self, action: ToastAction) {
+        match action {
+            ToastAction::OpenPlayerSettings => self.handle_nav_action(top_nav::NavAction::OpenPlayerSettings),
+            ToastAction::Play(media) => self.play(media),
+            ToastAction::PlayFromStart(media) => self.play_from(media, true),
         }
     }
     
@@ -680,7 +886,7 @@ impl IPTVPlayerApp {
 
     /// Whether the current view has anything to show in the sidebar.
     fn has_sidebar(&self) -> bool {
-        !matches!(self.current_content, ContentType::ContinueWatching)
+        !matches!(self.current_content, ContentType::Home | ContentType::ContinueWatching)
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -766,8 +972,8 @@ impl IPTVPlayerApp {
     /// Cycles through content types (for bumper button navigation)
     fn cycle_content_type(&mut self, forward: bool) {
         let content_order = [
+            ContentType::Home,
             ContentType::LiveTV,
-            ContentType::ContinueWatching,
             ContentType::Series,
             ContentType::Movies,
             ContentType::Favorites,
@@ -831,6 +1037,10 @@ impl IPTVPlayerApp {
                     AppMessage::Connected(categories, channels) => {
                         self.live_categories = categories;
                         self.all_channels = channels;
+                        self.channel_index = self.all_channels.iter()
+                            .enumerate()
+                            .map(|(i, ch)| (ch.stream_id.clone(), i))
+                            .collect();
                         self.filtered_channels = self.all_channels.clone();
                         self.connected = true;
                         self.connecting = false;
@@ -840,6 +1050,11 @@ impl IPTVPlayerApp {
                         self.load_movies();
                     }
                     AppMessage::Error(err) => {
+                        // The login screen shows errors itself; afterwards
+                        // they would go unseen without a toast
+                        if self.connected {
+                            self.toasts.error(err.clone(), None);
+                        }
                         self.error_message = Some(err);
                         self.connecting = false;
                     }
@@ -847,11 +1062,18 @@ impl IPTVPlayerApp {
                         self.series_categories = categories;
                         self.all_series = series;
                         self.filtered_series = self.all_series.clone();
+                        self.series_loaded = true;
+                        self.home_recent_series = newest(&self.all_series, |s| {
+                            s.last_modified.as_deref().and_then(|v| v.parse().ok()).unwrap_or(0)
+                        });
                     }
                     AppMessage::MoviesLoaded(categories, movies) => {
                         self.movie_categories = categories;
                         self.all_movies = movies;
                         self.filtered_movies = self.all_movies.clone();
+                        self.movies_loaded = true;
+                        self.home_recent_movies = newest(&self.all_movies, |m| json_number(m, "added") as i64);
+                        self.home_top_movies = top_rated(&self.all_movies);
                     }
                     AppMessage::ScraperStarted => {
                         self.scraping_in_progress = true;
@@ -865,6 +1087,9 @@ impl IPTVPlayerApp {
                     AppMessage::ScraperFailed(err) => {
                         self.scraping_in_progress = false;
                         self.scraper_message = Some(format!("Error: {}", err));
+                    }
+                    AppMessage::NextEpisodeFound { episode_id, next } => {
+                        self.set_next_episode(&episode_id, next);
                     }
                 }
             }
@@ -964,6 +1189,9 @@ impl IPTVPlayerApp {
                         self.set_page_size(self.layout.page_size(columns));
 
                         match self.current_content {
+                            ContentType::Home => {
+                                self.render_home(ui, ctx, theme);
+                            }
                             ContentType::LiveTV | ContentType::Favorites => {
                                 self.render_channels(ui, ctx, theme);
                             }
@@ -1021,112 +1249,15 @@ impl IPTVPlayerApp {
         }
 
         let grid = self.layout.poster_grid(ui.available_width());
-        let mut clicked_content: Option<crate::models::watch_history::WatchProgress> = None;
-
+        let mut clicked: Option<WatchProgress> = None;
         grid.show(ui, &items, |ui, progress| {
-            let card_width = grid.item_width;
-            let poster_height = dimensions::poster_height(card_width);
-            let (rect, response) = ui.allocate_exact_size(
-                egui::vec2(card_width, poster_height + 64.0),
-                egui::Sense::click(),
-            );
-            if response.clicked() {
-                clicked_content = Some(progress.clone());
+            if ResumeCard::show(ui, ctx, theme, progress, &self.image_cache, grid.item_width) {
+                clicked = Some(progress.clone());
             }
-            let highlighted = response.hovered() || response.has_focus();
-            let poster_rect = egui::Rect::from_min_size(rect.min, egui::vec2(card_width, poster_height));
-            let rounding = super::theme::radius::LG;
-
-            if highlighted {
-                ui.painter().rect_filled(
-                    poster_rect.expand(3.0).translate(egui::vec2(0.0, 4.0)),
-                    rounding,
-                    theme.elevated_shadow(),
-                );
-            }
-
-            // Poster or placeholder
-            let texture = progress.thumbnail.as_ref().and_then(|url| {
-                self.image_cache.load(ctx, url.clone());
-                self.image_cache.get(url)
-            });
-            if let Some(texture) = texture {
-                egui::Image::new(&texture)
-                    .rounding(rounding)
-                    .paint_at(ui, poster_rect);
-            } else {
-                ui.painter().rect_filled(poster_rect, rounding, theme.placeholder_bg());
-                ui.painter().text(
-                    poster_rect.center(),
-                    egui::Align2::CENTER_CENTER,
-                    progress.content_type.to_uppercase(),
-                    egui::FontId::proportional(typography::BODY_SM),
-                    theme.placeholder_icon(),
-                );
-            }
-            let border = if response.has_focus() { theme.accent_blue } else { theme.border_color };
-            ui.painter().rect_stroke(poster_rect, rounding, egui::Stroke::new(1.0, border));
-
-            // Resume button on hover
-            if highlighted {
-                let center = poster_rect.center();
-                let r = (card_width * 0.16).clamp(22.0, 36.0);
-                ui.painter().circle_filled(center, r, egui::Color32::from_black_alpha(180));
-                ui.painter().circle_stroke(center, r, egui::Stroke::new(2.0, egui::Color32::WHITE));
-                let t = r * 0.45;
-                ui.painter().add(egui::Shape::convex_polygon(
-                    vec![
-                        egui::pos2(center.x - t * 0.35, center.y - t * 0.6),
-                        egui::pos2(center.x - t * 0.35, center.y + t * 0.6),
-                        egui::pos2(center.x + t * 0.65, center.y),
-                    ],
-                    egui::Color32::WHITE,
-                    egui::Stroke::NONE,
-                ));
-            }
-
-            // Progress bar along the bottom edge of the poster
-            let bar = egui::Rect::from_min_max(
-                egui::pos2(poster_rect.min.x + spacing::SM, poster_rect.max.y - spacing::SM - 4.0),
-                egui::pos2(poster_rect.max.x - spacing::SM, poster_rect.max.y - spacing::SM),
-            );
-            let pct = (progress.progress_percentage() / 100.0).clamp(0.0, 1.0) as f32;
-            ui.painter().rect_filled(bar, 2.0, egui::Color32::from_white_alpha(60));
-            ui.painter().rect_filled(
-                egui::Rect::from_min_size(bar.min, egui::vec2(bar.width() * pct, bar.height())),
-                2.0,
-                theme.accent_blue,
-            );
-
-            // Title and details
-            let title = super::components::single_line(
-                ui,
-                &progress.content_name,
-                egui::FontId::proportional(typography::BODY_SM),
-                theme.text_primary,
-                card_width,
-            );
-            let title_y = poster_rect.max.y + spacing::SM;
-            ui.painter().galley(egui::pos2(rect.min.x, title_y), title, theme.text_primary);
-
-            let mins_left = ((progress.duration_seconds - progress.position_seconds) / 60.0).max(0.0) as i32;
-            let detail = match (progress.season, progress.episode) {
-                (Some(season), Some(episode)) => format!("S{}:E{} · {} min left", season, episode, mins_left),
-                _ => format!("{} min left", mins_left),
-            };
-            let detail = super::components::single_line(
-                ui,
-                &detail,
-                egui::FontId::proportional(typography::CAPTION),
-                theme.text_tertiary,
-                card_width,
-            );
-            ui.painter().galley(egui::pos2(rect.min.x, title_y + 20.0), detail, theme.text_tertiary);
         });
 
-        // Handle resume playback
-        if let Some(progress) = clicked_content {
-            self.resume_playback(&progress.content_id, &progress.content_type, progress.season, progress.episode);
+        if let Some(progress) = clicked {
+            self.resume(&progress);
         }
     }
 
@@ -1165,19 +1296,7 @@ impl IPTVPlayerApp {
 
         let grid = self.layout.wide_grid(ui.available_width());
         grid.show(ui, &page_channels, |ui, channel| {
-            // Build EPG info for this channel
-            let epg_info = {
-                let current = self.epg_cache.get_current_program(&channel.stream_id);
-                let next = self.epg_cache.get_next_program(&channel.stream_id);
-                if current.is_some() || next.is_some() {
-                    Some(channel_card::ChannelEpgInfo {
-                        current_program: current,
-                        next_program: next,
-                    })
-                } else {
-                    None
-                }
-            };
+            let epg_info = channel_epg(&self.epg_cache, channel);
 
             if let Some(action) = ChannelCard::show(
                 ui,
@@ -1207,7 +1326,7 @@ impl IPTVPlayerApp {
 
         // Process actions
         if let Some(channel) = channel_to_play {
-            self.play_channel(&channel);
+            self.play(channel_media(&channel));
         }
         if let Some(stream_id) = channel_to_toggle {
             self.toggle_favorite(&stream_id);
@@ -1248,13 +1367,8 @@ impl IPTVPlayerApp {
         });
 
         if let Some(id) = series_to_open {
-            // Create new episode dialog state - data loads in background
-            self.episode_dialog_state = Some(episode_dialog::EpisodeDialogState::new(
-                id,
-                self.server_url.clone(),
-                self.username.clone(),
-                self.password.clone(),
-            ));
+            // Data loads in the background
+            self.open_series(id);
         }
 
         if let Some(new_page) = Pagination::show(ui, theme, self.current_page, total_pages, &self.layout) {
@@ -1295,12 +1409,168 @@ impl IPTVPlayerApp {
             self.current_page = new_page;
         }
 
-        if let Some((stream_id, name, ext, thumbnail)) = movie_to_play {
-            self.play_movie(stream_id, &name, &ext, thumbnail);
+        if let Some((stream_id, name, container, thumbnail)) = movie_to_play {
+            self.play(Media::Movie { stream_id, name, container, thumbnail });
         }
 
         if self.filtered_movies.is_empty() {
             self.render_empty_state(ui, theme);
+        }
+    }
+
+    /// Renders the Home screen: rows to pick up where you left off and to
+    /// browse what's new, instead of one long paginated grid.
+    fn render_home(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, theme: &Theme) {
+        let layout = self.layout;
+        let poster_width = layout.shelf_poster_width();
+        let channel_width = layout.shelf_channel_width();
+        let section_gap = if layout.is_compact() { spacing::XL } else { spacing::XXL };
+
+        let mut navigate: Option<ContentType> = None;
+        let mut resume: Option<WatchProgress> = None;
+        let mut play: Option<Media> = None;
+        let mut series_to_open: Option<i32> = None;
+        let mut favorite_to_toggle: Option<String> = None;
+
+        self.epg_cache.process_pending();
+
+        // Continue watching
+        let continue_items = self.watch_history.get_continue_watching(SHELF_ITEMS);
+        if !continue_items.is_empty() {
+            if Shelf::header(ui, theme, &layout, "Continue watching", true) {
+                navigate = Some(ContentType::ContinueWatching);
+            }
+            Shelf::row(ui, theme, &layout, "continue", |ui| {
+                for progress in &continue_items {
+                    if ResumeCard::show(ui, ctx, theme, progress, &self.image_cache, poster_width) {
+                        resume = Some(progress.clone());
+                    }
+                }
+            });
+            ui.add_space(section_gap);
+        }
+
+        // Channels: favorites, then recently watched
+        let mut favorites: Vec<usize> = self.config.favorites.iter()
+            .filter_map(|id| self.channel_index.get(id).copied())
+            .collect();
+        favorites.sort_unstable();
+        favorites.truncate(SHELF_ITEMS);
+        let recent: Vec<usize> = self.watch_history.recent_channels(SHELF_ITEMS).iter()
+            .filter_map(|p| p.stream_id.as_ref().and_then(|id| self.channel_index.get(id)).copied())
+            .collect();
+
+        let mut channel_rows: Vec<(&str, &str, Vec<usize>, Option<ContentType>)> = Vec::new();
+        if !favorites.is_empty() {
+            channel_rows.push(("favorites", "Favorite channels", favorites.clone(), Some(ContentType::Favorites)));
+        }
+        if !recent.is_empty() {
+            channel_rows.push(("recent_channels", "Recently watched channels", recent.clone(), None));
+        }
+        if favorites.is_empty() && recent.is_empty() && !self.all_channels.is_empty() {
+            let first: Vec<usize> = (0..self.all_channels.len().min(SHELF_ITEMS)).collect();
+            channel_rows.push(("live", "Live channels", first, Some(ContentType::LiveTV)));
+        }
+
+        let favorite_ids = &self.config.favorites;
+        for (id, title, indices, see_all) in channel_rows {
+            if Shelf::header(ui, theme, &layout, title, see_all.is_some()) {
+                navigate = see_all;
+            }
+            if id == "live" {
+                Shelf::hint(ui, theme, "Tip: star ☆ a channel to pin it here for one-tap access.");
+                ui.add_space(spacing::MD);
+            }
+            for &i in &indices {
+                let channel = &self.all_channels[i];
+                self.epg_cache.request_epg_with_tvg(&channel.stream_id, channel.epg_channel_id.as_deref());
+            }
+            Shelf::row(ui, theme, &layout, id, |ui| {
+                for &i in &indices {
+                    let channel = &self.all_channels[i];
+                    let epg = channel_epg(&self.epg_cache, channel);
+                    let action = ChannelCard::show(
+                        ui,
+                        ctx,
+                        theme,
+                        channel,
+                        favorite_ids.contains(&channel.stream_id),
+                        &self.image_cache,
+                        channel_width,
+                        epg.as_ref(),
+                    );
+                    match action {
+                        Some(channel_card::ChannelAction::Play(ch)) => play = Some(channel_media(&ch)),
+                        Some(channel_card::ChannelAction::ToggleFavorite(id)) => favorite_to_toggle = Some(id),
+                        None => {}
+                    }
+                }
+            });
+            ui.add_space(section_gap);
+        }
+
+        // Movies and series
+        let movie_rows = [
+            ("new_movies", if has_added_dates(&self.home_recent_movies) { "Recently added movies" } else { "Movies" }, &self.home_recent_movies),
+            ("top_movies", "Top rated movies", &self.home_top_movies),
+        ];
+        for (id, title, movies) in movie_rows {
+            if !self.movies_loaded {
+                Shelf::header(ui, theme, &layout, title, false);
+                Shelf::skeleton_posters(ui, theme, &layout, id, poster_width);
+                ui.add_space(section_gap);
+                continue;
+            }
+            if movies.is_empty() {
+                continue;
+            }
+            if Shelf::header(ui, theme, &layout, title, true) {
+                navigate = Some(ContentType::Movies);
+            }
+            Shelf::row(ui, theme, &layout, id, |ui| {
+                for movie in movies {
+                    if let Some(movie_card::MovieAction::Play { stream_id, name, container_extension, thumbnail }) =
+                        MovieCard::show(ui, ctx, theme, movie, &self.image_cache, poster_width)
+                    {
+                        play = Some(Media::Movie { stream_id, name, container: container_extension, thumbnail });
+                    }
+                }
+            });
+            ui.add_space(section_gap);
+        }
+
+        if !self.series_loaded {
+            Shelf::header(ui, theme, &layout, "Recently updated series", false);
+            Shelf::skeleton_posters(ui, theme, &layout, "new_series", poster_width);
+        } else if !self.home_recent_series.is_empty() {
+            if Shelf::header(ui, theme, &layout, "Recently updated series", true) {
+                navigate = Some(ContentType::Series);
+            }
+            Shelf::row(ui, theme, &layout, "new_series", |ui| {
+                for series in &self.home_recent_series {
+                    if let Some(series_card::SeriesAction::ViewEpisodes(id)) =
+                        SeriesCard::show(ui, ctx, theme, series, &self.image_cache, poster_width)
+                    {
+                        series_to_open = Some(id);
+                    }
+                }
+            });
+        }
+
+        if let Some(content) = navigate {
+            self.handle_nav_action(top_nav::NavAction::SwitchContent(content));
+        }
+        if let Some(progress) = resume {
+            self.resume(&progress);
+        }
+        if let Some(media) = play {
+            self.play(media);
+        }
+        if let Some(id) = series_to_open {
+            self.open_series(id);
+        }
+        if let Some(id) = favorite_to_toggle {
+            self.toggle_favorite(&id);
         }
     }
 
@@ -1696,7 +1966,7 @@ impl IPTVPlayerApp {
                     }
                 });
             }
-            ContentType::ContinueWatching => {}
+            ContentType::Home | ContentType::ContinueWatching => {}
         }
 
         // Selecting something in the drawer dismisses it
@@ -1780,6 +2050,14 @@ impl IPTVPlayerApp {
                 self.filter_content();
             }
             top_nav::NavAction::SearchChanged => {
+                // Home has nothing to filter; search live channels from there
+                // (as the app did when it opened on Live TV)
+                if matches!(self.current_content, ContentType::Home | ContentType::ContinueWatching)
+                    && !self.search_query.is_empty()
+                {
+                    self.current_content = ContentType::LiveTV;
+                    self.selected_category = None;
+                }
                 self.filter_content();
             }
             top_nav::NavAction::ToggleTheme => {
@@ -1807,6 +2085,64 @@ impl IPTVPlayerApp {
     }
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// Helpers
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Playable media for a live channel.
+fn channel_media(channel: &Channel) -> Media {
+    Media::Channel {
+        stream_id: channel.stream_id.clone(),
+        name: channel.name.clone(),
+        icon: Some(channel.stream_icon.clone()).filter(|s| !s.is_empty()),
+    }
+}
+
+/// Now/next programme info for a channel card, if the guide has any.
+fn channel_epg(epg: &super::epg_cache::EpgCache, channel: &Channel) -> Option<channel_card::ChannelEpgInfo> {
+    let current = epg.get_current_program(&channel.stream_id);
+    let next = epg.get_next_program(&channel.stream_id);
+    (current.is_some() || next.is_some()).then_some(channel_card::ChannelEpgInfo {
+        current_program: current,
+        next_program: next,
+    })
+}
+
+/// A number that providers send either as a JSON number or a string.
+fn json_number(value: &serde_json::Value, key: &str) -> f64 {
+    match value.get(key) {
+        Some(serde_json::Value::Number(n)) => n.as_f64().unwrap_or(0.0),
+        Some(serde_json::Value::String(s)) => s.trim().parse().unwrap_or(0.0),
+        _ => 0.0,
+    }
+}
+
+/// The `SHELF_ITEMS` items with the largest `key` (newest first).
+fn newest<T: Clone>(items: &[T], key: impl Fn(&T) -> i64) -> Vec<T> {
+    let mut keyed: Vec<(i64, &T)> = items.iter().map(|item| (key(item), item)).collect();
+    keyed.sort_by(|a, b| b.0.cmp(&a.0));
+    keyed.into_iter().take(SHELF_ITEMS).map(|(_, item)| item.clone()).collect()
+}
+
+/// Whether the provider sends "added" dates, so "Recently added" is true.
+fn has_added_dates(movies: &[serde_json::Value]) -> bool {
+    movies.first().is_some_and(|m| json_number(m, "added") > 0.0)
+}
+
+/// Best rated movies (ratings out of 10). Empty when too few movies have
+/// a rating for the row to be meaningful.
+fn top_rated(movies: &[serde_json::Value]) -> Vec<serde_json::Value> {
+    let mut rated: Vec<(f64, f64, &serde_json::Value)> = movies.iter()
+        .map(|m| (json_number(m, "rating"), json_number(m, "added"), m))
+        .filter(|(rating, _, _)| *rating > 0.0 && *rating <= 10.0)
+        .collect();
+    if rated.len() < 5 {
+        return Vec::new();
+    }
+    rated.sort_by(|a, b| b.0.total_cmp(&a.0).then(b.1.total_cmp(&a.1)));
+    rated.into_iter().take(SHELF_ITEMS).map(|(_, _, m)| m.clone()).collect()
+}
+
 impl eframe::App for IPTVPlayerApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         // Manage repaint frequency based on loading state
@@ -1827,6 +2163,7 @@ impl eframe::App for IPTVPlayerApp {
 
         // Process background messages
         self.process_messages();
+        self.process_playback_events();
 
         // Update responsive layout for the current window size
         let screen = ctx.screen_rect();
@@ -1876,6 +2213,24 @@ impl eframe::App for IPTVPlayerApp {
                     });
             }
 
+            // Now playing - sits above the phone tab bar
+            let mut stop_playback = false;
+            if let Some(session) = self.current_session.and_then(|id| self.playback_sessions.get(&id)) {
+                egui::TopBottomPanel::bottom("now_playing")
+                    .frame(egui::Frame::none()
+                        .fill(theme.panel_bg)
+                        .stroke(egui::Stroke::new(1.0, theme.border_color))
+                        .inner_margin(egui::Margin::symmetric(layout.content_padding(), spacing::SM)))
+                    .show(ctx, |ui| {
+                        stop_playback = now_playing::now_playing_bar(ui, &theme, &layout, session);
+                    });
+            }
+            if stop_playback {
+                if let Some(session) = self.current_session.and_then(|id| self.playback_sessions.get(&id)) {
+                    session.handle.stop();
+                }
+            }
+
             // Wide layouts dock the sidebar beside the content
             if layout.docked_sidebar() && self.sidebar_visible && has_sidebar {
                 egui::SidePanel::left("categories")
@@ -1891,7 +2246,7 @@ impl eframe::App for IPTVPlayerApp {
             }
 
             // Main content area
-            egui::CentralPanel::default()
+            let content_rect = egui::CentralPanel::default()
                 .frame(egui::Frame::none().fill(theme.bg_color))
                 .show(ctx, |ui| {
                     let padding = layout.content_padding();
@@ -1915,7 +2270,13 @@ impl eframe::App for IPTVPlayerApp {
 
                     // Content area
                     self.render_content(ui, ctx, &theme);
-                });
+                })
+                .response
+                .rect;
+
+            if let Some(action) = self.toasts.show(ctx, &theme, content_rect) {
+                self.handle_toast_action(action);
+            }
 
             // Narrow layouts show the sidebar as a slide-over drawer
             if self.drawer_open && has_sidebar {
@@ -1924,10 +2285,20 @@ impl eframe::App for IPTVPlayerApp {
 
             // Episode dialog - use cached state for fast rendering
             if let Some(ref mut state) = self.episode_dialog_state {
-                if let Some(action) = EpisodeDialog::show(ctx, &theme, state, &self.config.player_settings) {
+                if let Some(action) = EpisodeDialog::show(ctx, &theme, state, &self.watch_history) {
                     match action {
-                        episode_dialog::EpisodeAction::PlayEpisode { episode_id, series_name, season, episode, title, container } => {
-                            self.play_episode(&episode_id, &series_name, season, episode, &title, &container);
+                        episode_dialog::EpisodeAction::PlayEpisode { episode_id, series_name, season, episode, title, container, series_id, cover, next } => {
+                            self.play(Media::Episode {
+                                episode_id,
+                                series_id: Some(series_id),
+                                series_name,
+                                season,
+                                episode,
+                                title,
+                                container,
+                                thumbnail: cover,
+                                next,
+                            });
                         }
                         episode_dialog::EpisodeAction::Close => {
                             self.episode_dialog_state = None;
@@ -1944,6 +2315,7 @@ impl eframe::App for IPTVPlayerApp {
                             player_settings::PlayerSettingsAction::Saved => {
                                 self.config.player_settings = temp_settings.clone();
                                 let _ = self.config.save();
+                                self.toasts.push(ToastKind::Success, "Player settings saved", None);
                                 self.show_player_settings = false;
                                 self.temp_player_settings = None;
                             }
@@ -1984,6 +2356,7 @@ impl eframe::App for IPTVPlayerApp {
                                 self.epg_cache.set_xmltv_url(None);
                             }
 
+                            self.toasts.push(ToastKind::Success, "TV guide settings saved", None);
                             self.show_epg_settings = false;
                         }
                         epg_settings::EpgSettingsAction::Cancelled => {

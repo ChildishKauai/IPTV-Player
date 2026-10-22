@@ -119,6 +119,25 @@ impl Layout {
         Grid::fit(available_width, 290.0, 440.0, self.grid_gap())
     }
 
+    /// Card width for poster rows on the Home screen.
+    pub fn shelf_poster_width(&self) -> f32 {
+        match self.size_class {
+            SizeClass::Compact => 120.0,
+            SizeClass::Medium => 140.0,
+            SizeClass::Expanded if self.width >= 1920.0 => 190.0,
+            SizeClass::Expanded => 165.0,
+        }
+    }
+
+    /// Card width for channel rows on the Home screen. On phones the next
+    /// card peeks in from the edge so the row reads as scrollable.
+    pub fn shelf_channel_width(&self) -> f32 {
+        match self.size_class {
+            SizeClass::Compact => (self.width - self.content_padding() * 2.0 - 48.0).clamp(240.0, 320.0),
+            _ => 320.0,
+        }
+    }
+
     /// Items per page, rounded to fill complete rows.
     pub fn page_size(&self, columns: usize) -> usize {
         let target = match self.size_class {

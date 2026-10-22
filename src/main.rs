@@ -29,6 +29,7 @@ use eframe::egui;
 
 mod api;
 mod media_tools;
+mod playback;
 mod models;
 mod m3u;
 mod xmltv;

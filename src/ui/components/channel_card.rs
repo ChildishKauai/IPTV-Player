@@ -67,6 +67,11 @@ impl ChannelCard {
             egui::Sense::click(),
         );
 
+        // Keep gamepad/keyboard focus visible inside scrolling rows and grids
+        if response.gained_focus() {
+            response.scroll_to_me(None);
+        }
+
         if response.clicked() {
             action = Some(ChannelAction::Play(channel.clone()));
         }

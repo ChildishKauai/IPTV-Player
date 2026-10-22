@@ -38,14 +38,20 @@ pub enum NavAction {
 struct Tab(&'static str, &'static str, &'static str, ContentType);
 
 const TABS: [Tab; 7] = [
+    Tab("🏠", "Home", "Home", ContentType::Home),
     Tab("📺", "Live", "Live", ContentType::LiveTV),
-    Tab("▶", "Continue", "Resume", ContentType::ContinueWatching),
     Tab("🎞", "Series", "Series", ContentType::Series),
     Tab("🎬", "Movies", "Movies", ContentType::Movies),
     Tab("★", "My List", "My List", ContentType::Favorites),
     Tab("🔥", "Discover", "Discover", ContentType::Discover),
     Tab("⚽", "Sports", "Sports", ContentType::FootballFixtures),
 ];
+
+/// Whether `tab` is the active destination. Continue Watching is opened
+/// from its Home row, so Home stays highlighted there.
+fn is_selected(current: ContentType, tab: ContentType) -> bool {
+    current == tab || (tab == ContentType::Home && current == ContentType::ContinueWatching)
+}
 
 /// Minimum header width needed to fit the tabs inline next to the logo.
 const INLINE_TABS_MIN_WIDTH: f32 = 960.0;
@@ -89,7 +95,7 @@ impl TopNavigation {
             if inline_tabs {
                 ui.add_space(spacing::XL);
                 for tab in &TABS {
-                    if Self::nav_tab(ui, theme, current_content == tab.3, tab.1).clicked() {
+                    if Self::nav_tab(ui, theme, is_selected(current_content, tab.3), tab.1).clicked() {
                         action = Some(NavAction::SwitchContent(tab.3));
                     }
                     ui.add_space(spacing::SM);
@@ -156,7 +162,7 @@ impl TopNavigation {
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing = egui::Vec2::ZERO;
             for tab in &TABS {
-                let is_selected = current_content == tab.3;
+                let is_selected = is_selected(current_content, tab.3);
                 let (rect, response) =
                     ui.allocate_exact_size(egui::vec2(item_width, height), egui::Sense::click());
 
@@ -321,7 +327,10 @@ impl TopNavigation {
                     ui.label(egui::RichText::new("🔍").size(font_size).color(theme.text_muted));
 
                     let clear_width = if search_query.is_empty() { 0.0 } else { 28.0 };
+                    // Stable id: keeps focus when the header layout changes
+                    // mid-typing (e.g. searching from Home switches tabs)
                     let edit = egui::TextEdit::singleline(search_query)
+                        .id(egui::Id::new("nav_search"))
                         .hint_text(egui::RichText::new(hint).size(font_size).color(theme.text_muted))
                         .desired_width((ui.available_width() - clear_width).max(40.0))
                         .font(egui::FontId::proportional(font_size))
@@ -361,7 +370,7 @@ impl TopNavigation {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = spacing::SM;
                     for tab in &TABS {
-                        let is_selected = current_content == tab.3;
+                        let is_selected = is_selected(current_content, tab.3);
                         let (fill, fg) = if is_selected {
                             (theme.accent_blue, egui::Color32::WHITE)
                         } else {

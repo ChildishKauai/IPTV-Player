@@ -35,6 +35,18 @@ impl PlayerType {
         }
     }
     
+    /// Short name used in status messages ("Opening in mpv…").
+    pub fn short_name(&self) -> &'static str {
+        match self {
+            PlayerType::MPV => "mpv",
+            PlayerType::FFplay => "FFplay",
+            PlayerType::VLC => "VLC",
+            PlayerType::MpcHc => "MPC-HC",
+            PlayerType::PotPlayer => "PotPlayer",
+            PlayerType::Custom => "your player",
+        }
+    }
+
     /// Get the default executable name/command for the player.
     /// Returns a list of possible paths to try (first match wins).
     pub fn default_executables(&self) -> Vec<&'static str> {
@@ -100,6 +112,17 @@ impl PlayerType {
             PlayerType::Custom,
         ]
     }
+}
+
+/// Per-launch options for resuming playback and reading progress back.
+#[derive(Debug, Clone, Default)]
+pub struct LaunchOptions {
+    /// Start playback at this position (seconds)
+    pub start_at: Option<f64>,
+    /// mpv JSON IPC endpoint (Unix socket path or Windows named pipe)
+    pub mpv_ipc: Option<String>,
+    /// TCP port for VLC's remote control interface
+    pub vlc_rc_port: Option<u16>,
 }
 
 /// Player settings for audio and subtitle track selection.
@@ -570,7 +593,17 @@ impl PlayerSettings {
     }
     
     /// Launch the configured player with the given URL and title.
-    pub fn launch_player(&self, url: &str, title: &str, is_live: bool) -> std::io::Result<std::process::Child> {
+    ///
+    /// stderr is piped so the caller can explain failures to the user.
+    pub fn launch_player(
+        &self,
+        url: &str,
+        title: &str,
+        is_live: bool,
+        options: &LaunchOptions,
+    ) -> std::io::Result<std::process::Child> {
+        use std::process::Stdio;
+
         let executable = self.get_player_executable();
         
         // Trim URL to remove any leading/trailing whitespace
@@ -579,28 +612,21 @@ impl PlayerSettings {
         // Log the command for debugging
         eprintln!("[Player] Launching: {} with URL: {}", executable, url);
         
-        // Create command - GUI players need to show their window, don't use CREATE_NO_WINDOW
+        let mut cmd = std::process::Command::new(&executable);
+        cmd.stdin(Stdio::null());
+        cmd.stdout(Stdio::null());
+        cmd.stderr(Stdio::piped());
+
+        // GUI players need to show their window, don't use CREATE_NO_WINDOW
         // Only use DETACHED_PROCESS to separate from our console
         #[cfg(windows)]
-        let mut cmd = {
+        {
             use std::os::windows::process::CommandExt;
-            let mut c = std::process::Command::new(&executable);
             // DETACHED_PROCESS = 0x00000008 - Runs independently without console
-            // Don't use CREATE_NO_WINDOW (0x08000000) as it prevents GUI from showing
-            c.creation_flags(0x00000008);
-            c
-        };
-        
-        #[cfg(not(windows))]
-        let mut cmd = {
-            use std::process::Stdio;
-            let mut c = std::process::Command::new(&executable);
-            // Properly detach from parent process on Linux
-            c.stdin(Stdio::null());
-            c.stdout(Stdio::null());
-            c.stderr(Stdio::inherit()); // Keep stderr for debugging
-            c
-        };
+            cmd.creation_flags(0x00000008);
+        }
+
+        let start_at = options.start_at.filter(|s| *s > 0.0);
         
         match self.player_type {
             PlayerType::FFplay => {
@@ -612,9 +638,23 @@ impl PlayerSettings {
                     cmd.arg("-probesize").arg("32");
                     cmd.arg("-analyzeduration").arg("0");
                 }
+                if let Some(start) = start_at {
+                    cmd.arg("-ss").arg(format!("{:.0}", start));
+                }
                 cmd.arg(url);
             }
             PlayerType::VLC => {
+                let mut extra = Vec::new();
+                if let Some(start) = start_at {
+                    extra.push(format!("--start-time={:.0}", start));
+                }
+                if let Some(port) = options.vlc_rc_port {
+                    extra.push("--extraintf=rc".to_string());
+                    extra.push(format!("--rc-host=127.0.0.1:{}", port));
+                    #[cfg(windows)]
+                    extra.push("--rc-quiet".to_string());
+                }
+
                 // VLC on Linux needs URL first, then options work better
                 #[cfg(not(windows))]
                 {
@@ -624,6 +664,7 @@ impl PlayerSettings {
                         cmd.arg(arg);
                     }
                     cmd.arg("--http-user-agent=IPTV-Player/1.0");
+                    cmd.args(&extra);
                 }
                 
                 #[cfg(windows)]
@@ -633,6 +674,7 @@ impl PlayerSettings {
                         cmd.arg(arg);
                     }
                     cmd.arg("--http-user-agent=IPTV-Player/1.0");
+                    cmd.args(&extra);
                     cmd.arg(url);
                 }
             }
@@ -643,6 +685,12 @@ impl PlayerSettings {
                 }
                 // Add user-agent for IPTV compatibility
                 cmd.arg("--user-agent=IPTV-Player/1.0");
+                if let Some(start) = start_at {
+                    cmd.arg(format!("--start={:.0}", start));
+                }
+                if let Some(ipc) = &options.mpv_ipc {
+                    cmd.arg(format!("--input-ipc-server={}", ipc));
+                }
                 // Use -- to separate options from URL
                 cmd.arg("--");
                 cmd.arg(url);
@@ -651,11 +699,18 @@ impl PlayerSettings {
                 for arg in self.build_mpchc_args() {
                     cmd.arg(arg);
                 }
+                if let Some(start) = start_at {
+                    cmd.arg("/start").arg(format!("{:.0}", start * 1000.0));
+                }
                 cmd.arg(url);
             }
             PlayerType::PotPlayer => {
                 for arg in self.build_potplayer_args() {
                     cmd.arg(arg);
+                }
+                if let Some(start) = start_at {
+                    let secs = start as u64;
+                    cmd.arg(format!("/seek={:02}:{:02}:{:02}", secs / 3600, secs / 60 % 60, secs % 60));
                 }
                 cmd.arg(url);
             }

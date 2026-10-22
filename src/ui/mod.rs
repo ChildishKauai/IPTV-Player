@@ -9,6 +9,7 @@
 //! - `epg_cache` - EPG data caching and background loading
 //! - `components` - Reusable UI components
 //! - `layout` - Responsive layout metrics and grids
+//! - `now_playing` - Playable media and the now-playing bar
 
 pub mod app;
 pub mod theme;
@@ -17,5 +18,6 @@ pub mod image_cache;
 pub mod epg_cache;
 pub mod components;
 pub mod layout;
+pub mod now_playing;
 
 pub use app::IPTVPlayerApp;
